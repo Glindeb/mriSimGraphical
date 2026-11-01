@@ -1,0 +1,2009 @@
+<!doctype html>
+<!--
+  Build sim — build a simple pulse sequence from RF pulses, gradients and ADC
+  events, and see which slice it excites and what image it produces.
+  Designed by Filip Sz (Lund University) and coded by Claude (Anthropic).
+  The 3D phantom and its tissue values are taken from Seqret (same authors).
+
+  Single self-contained file: no build step, no network, no dependencies.
+  Version history lives in the CHANGELOG constant in the script below and is
+  shown in the version dialog; bump VERSION whenever you change the physics or the UI.
+  VERSION is the single source of truth — this header deliberately does not repeat it.
+  The file name carries no version (mriBuildSim.html); git tracks the history.
+-->
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Build sim — build a pulse sequence</title>
+<meta name="author" content="Filip Sz (Lund University); Claude (Anthropic)">
+<meta name="description" content="Build a simple MRI pulse sequence from RF pulses, gradients and readouts, and see the excited slice and the simulated image.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23151b24'/%3E%3Cg fill='none' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 12h5l1.5-6 1.5 6h16' stroke='%23ff6b8b'/%3E%3Cpath d='M4 24h4l2-5h5l2 5h11' stroke='%232fb6b0'/%3E%3C/g%3E%3C/svg%3E">
+<style>
+:root{
+  --bg:#0e1219; --panel:#151b24; --panel2:#1b2230; --line:#26303f;
+  --text:#ccd6e4; --muted:#7c8a9d; --dim:#4d5a6b;
+  --ui:#2fb6b0; --btn:#1b2230; --btnh:#232c3c; --btna:#2a3547;
+  --grid:#1a2230; --grad:#aab6c6; --adc:#e0a93a; --echo:#e8eef6;
+  --p0:#ff6b8b; --p1:#5b8cff; --p2:#3cc88c; --p3:#c77dff; --p4:#4fd2e0; --p5:#f2c14e;
+}
+html[data-theme="light"]{
+  --bg:#f2f4f7; --panel:#ffffff; --panel2:#f7f9fb; --line:#d7dde5;
+  --text:#1b2430; --muted:#5f6c7d; --dim:#9aa5b3;
+  --ui:#0f8f8a; --btn:#eef1f5; --btnh:#e4e9f0; --btna:#d9e0ea;
+  --grid:#e8ecf1; --grad:#3b4757; --adc:#b77a0b; --echo:#1b2430;
+  --p0:#d6335b; --p1:#2d5fd6; --p2:#1b9a62; --p3:#8a45c9; --p4:#13a0b0; --p5:#b98a10;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font:13px/1.45 ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  -webkit-font-smoothing:antialiased;
+  display:grid; grid-template-columns:300px 1fr; height:100vh; overflow:hidden;
+}
+/* ------------------------------------------------------------- rail */
+#rail{background:var(--panel); border-right:1px solid var(--line); overflow-y:auto; padding:0 0 24px}
+#rail::-webkit-scrollbar{width:9px}
+#rail::-webkit-scrollbar-thumb{background:var(--line)}
+#rail .brand{
+  position:sticky; top:0; z-index:3; background:var(--panel);
+  border-bottom:1px solid var(--line); padding:13px 14px 11px; margin:0;
+  display:flex; flex-wrap:wrap; align-items:baseline; gap:0 5px;
+}
+#rail .brand h1{
+  margin:0 auto 0 0; font-size:12px; font-weight:600; line-height:1.45;
+  letter-spacing:.16em; text-transform:uppercase; white-space:nowrap; color:var(--text);
+}
+#rail .brand .brand-sub{flex:1 0 100%; margin:6px 0 0; font-size:11px; line-height:1.4; color:var(--muted)}
+.themebtn,button.themebtn{
+  appearance:none; background:transparent; border:1px solid var(--line); color:var(--muted);
+  font:inherit; font-size:10px; line-height:1.45; letter-spacing:.1em; text-transform:uppercase;
+  padding:3px 7px; cursor:pointer; border-radius:2px; margin:0;
+}
+.themebtn:hover,button.themebtn:hover{background:transparent; color:var(--text); border-color:var(--muted)}
+section{border-bottom:1px solid var(--line); padding:11px 14px 13px}
+h2{font-size:10px; font-weight:400; letter-spacing:.18em; text-transform:uppercase; color:var(--dim); margin:0 0 9px}
+.row{display:flex; gap:5px; flex-wrap:wrap; margin-bottom:9px}
+.row:last-child{margin-bottom:0}
+button{
+  font:inherit; font-size:11.5px; color:var(--text); background:var(--btn);
+  border:1px solid var(--line); border-radius:3px; padding:5px 9px; cursor:pointer;
+}
+button.sm{padding:3px 7px; font-size:11px}
+button:hover{background:var(--btnh)}
+button:active{background:var(--btna)}
+button[aria-pressed="true"]{border-color:var(--ui); color:var(--ui)}
+button.primary,button.primary:hover{color:var(--ui); border-color:var(--ui)}
+button:disabled{opacity:.45; cursor:default}
+:focus-visible{outline:2px solid var(--ui); outline-offset:2px}
+.ctl{margin:0 0 10px}
+.ctl:last-child{margin-bottom:0}
+.lab{display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:2px}
+.lab span:first-child{color:var(--muted); font-size:12px}
+.val{color:var(--text); font-size:12px; font-variant-numeric:tabular-nums; white-space:nowrap}
+.sub{color:var(--dim); font-size:10.5px; line-height:1.45; margin:4px 0 0}
+input[type=range]{-webkit-appearance:none; appearance:none; width:100%; height:18px; margin:0; background:transparent; cursor:pointer}
+input[type=range]::-webkit-slider-runnable-track{height:2px; background:var(--line)}
+input[type=range]::-moz-range-track{height:2px; background:var(--line)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:12px; height:12px; margin-top:-5px; border:0; border-radius:50%; background:var(--ui)}
+input[type=range]::-moz-range-thumb{width:12px; height:12px; border:0; border-radius:50%; background:var(--ui)}
+input[type=checkbox],input[type=radio]{accent-color:var(--ui)}
+input[type=number]{
+  font:inherit; font-size:12px; color:var(--text); background:var(--panel2);
+  border:1px solid var(--line); border-radius:3px; padding:2px 5px; width:78px; text-align:right;
+  -moz-appearance:textfield;
+}
+input[type=number]::-webkit-inner-spin-button{opacity:.4}
+select{
+  font:inherit; font-size:12px; color:var(--text); background:var(--panel2);
+  border:1px solid var(--line); border-radius:3px; padding:3px 5px; width:100%; cursor:pointer;
+}
+.sel{display:grid; grid-template-columns:1fr 1fr; gap:6px 8px; align-items:center; margin-bottom:10px}
+.sel label{color:var(--muted); font-size:12px}
+.sel:last-child{margin-bottom:0}
+label.chk{display:inline-flex; gap:5px; align-items:center; color:var(--muted); font-size:12px; cursor:pointer; margin-right:10px}
+table.read{width:100%; border-collapse:collapse; font-size:11.5px; font-variant-numeric:tabular-nums}
+table.read td{padding:2px 0; color:var(--muted); vertical-align:top}
+table.read td:last-child{text-align:right; color:var(--text)}
+.note{color:var(--muted); font-size:11px; line-height:1.55; margin:0}
+.note b{color:var(--text); font-weight:600}
+.warn{color:var(--adc); font-size:10.5px; line-height:1.45; margin:6px 0 0}
+.warn:empty{display:none}
+.sw{display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:5px; vertical-align:-1px}
+ul.echoes{list-style:none; margin:0; padding:0; font-size:11.5px; line-height:1.55}
+ul.echoes li{color:var(--muted)}
+ul.echoes li b{color:var(--text); font-weight:600}
+.credit{margin:14px 14px 0; font-size:10px; line-height:1.6; color:var(--dim); letter-spacing:.02em}
+/* ------------------------------------------------------------- main */
+main{display:grid; grid-template-rows:minmax(340px,1.6fr) minmax(210px,1fr); min-width:0; min-height:0; overflow:hidden; background:var(--line); gap:1px}
+#tl{background:var(--bg); position:relative; min-width:0; min-height:0; display:flex; flex-direction:column}
+#tlwrap{position:relative; flex:1; min-height:0}
+.palette{display:flex; gap:5px; flex-wrap:wrap; align-items:center; padding:7px 10px; border-bottom:1px solid var(--line)}
+.palette .plab{font-size:10px; letter-spacing:.18em; text-transform:uppercase; color:var(--dim); margin-right:6px}
+.palette .chip{touch-action:none; cursor:grab; user-select:none; -webkit-user-select:none; padding:3px 8px; font-size:11px}
+.palette .chip .sw{margin-right:6px}
+.palette .sp{flex:1}
+#tlc{position:absolute; left:0; top:0; display:block; width:100%; touch-action:none}
+#bottom{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:1px; background:var(--line); min-height:0}
+.ktools{position:absolute; top:6px; right:8px; z-index:3; display:flex; gap:6px; align-items:center; font-size:10.5px; color:var(--muted)}
+.ktools select{width:auto; padding:1px 4px; font-size:10.5px; max-width:150px}
+.ktools input[type=range]{width:90px}
+.ktools .val{font-size:10.5px; min-width:44px; text-align:right}
+#cK{touch-action:none}
+.pane{position:relative; min-width:0; min-height:0; background:var(--bg); overflow:hidden}
+.pane canvas{position:absolute; inset:0; width:100%; height:100%; display:block}
+#c3{cursor:grab; touch-action:none}
+#c3.drag{cursor:grabbing}
+.tag{position:absolute; top:9px; left:12px; z-index:2; pointer-events:none; font-size:10px; letter-spacing:.13em; text-transform:uppercase; color:var(--dim)}
+.hint{position:absolute; bottom:8px; right:12px; z-index:2; pointer-events:none; font-size:10px; color:var(--dim)}
+.legend{position:absolute; top:28px; left:12px; z-index:2; pointer-events:none; font-size:10.5px; line-height:1.55; color:var(--muted);
+  background:color-mix(in srgb, var(--panel) 80%, transparent); border:1px solid var(--line); border-radius:3px; padding:4px 7px; max-width:calc(100% - 24px)}
+.legend:empty{display:none}
+.imgtools{position:absolute; top:6px; right:8px; z-index:3; display:flex; gap:4px}
+.imgtools button{padding:2px 6px; font-size:10.5px}
+.imginfo{position:absolute; left:12px; right:12px; bottom:8px; z-index:2; pointer-events:none; font-size:10.5px; line-height:1.5; color:var(--muted)}
+.busy{position:absolute; top:9px; left:50%; transform:translateX(-50%); z-index:3; font-size:10.5px; color:var(--ui); pointer-events:none}
+.busy[hidden]{display:none}
+#ghost{position:fixed; z-index:50; pointer-events:none; padding:3px 8px; font-size:11px; border:1px solid var(--ui); color:var(--ui); background:var(--panel); border-radius:3px; opacity:.9}
+#ghost[hidden]{display:none}
+/* ------------------------------------------------------------- about */
+#about[hidden]{display:none}
+#about{position:fixed; inset:0; z-index:40; display:grid; place-items:center; background:rgba(0,0,0,.5); padding:20px}
+#about .sheet{background:var(--panel); border:1px solid var(--line); border-radius:4px; padding:20px 22px; max-width:580px; width:100%; max-height:84vh; overflow-y:auto}
+#about h3{margin:0 0 3px; font-size:13px; letter-spacing:.16em; text-transform:uppercase}
+#about .by{margin:0 0 12px; color:var(--ui); font-size:12px}
+#about .note{margin:0 0 12px; font-size:11.5px; line-height:1.6}
+#about .rel{border-top:1px solid var(--line); padding-top:9px; margin-top:9px}
+#about .rel h5{margin:0 0 5px; font-size:11px; letter-spacing:.1em; font-weight:600; color:var(--text)}
+#about .rel h5 em{color:var(--dim); font-style:normal; font-weight:400; letter-spacing:0}
+#about .rel p{margin:0; color:var(--muted); font-size:11.5px; line-height:1.6}
+#about #aboutClose{margin-top:18px}
+@media (max-width:1000px){
+  body{grid-template-columns:1fr; grid-template-rows:auto auto; height:auto; overflow:auto}
+  #rail{border-right:none; border-bottom:1px solid var(--line); overflow:visible}
+  main{overflow:visible}
+  #bottom{grid-template-columns:1fr; grid-auto-rows:min(92vw,460px)}
+  #tlwrap{flex:none; height:430px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<div id="rail">
+  <div class="brand">
+    <h1>Build sim</h1>
+    <button class="themebtn" id="ver" type="button" title="Version, credits and changelog"></button>
+    <button class="themebtn" id="theme" type="button" title="Switch colour theme">Light</button>
+    <p class="brand-sub">Build a pulse sequence from RF pulses, gradients and readouts, and see the slice and the image it makes</p>
+  </div>
+
+  <section>
+    <h2>Examples</h2>
+    <div class="row" id="presets">
+      <button class="sm" data-preset="empty" type="button">Empty</button>
+      <button class="sm" data-preset="gre" type="button">Gradient echo</button>
+      <button class="sm" data-preset="se" type="button">Spin echo</button>
+      <button class="sm" data-preset="ste" type="button">Stimulated echo</button>
+      <button class="sm" data-preset="dse" type="button">Double spin echo</button>
+      <button class="sm" data-preset="irse" type="button">Inversion recovery SE</button>
+    </div>
+    <p class="sub" id="presetNote">Drag blocks from the bar above the sequence onto its rails (a gradient onto any gradient axis, a phase table onto Gy). Click a block to edit it; Delete removes it.</p>
+  </section>
+
+  <section>
+    <h2>Selected</h2>
+    <div id="insp"><p class="note">Nothing selected. Click a block in the sequence.</p></div>
+  </section>
+
+  <section>
+    <h2>Echoes</h2>
+    <ul class="echoes" id="echoList"></ul>
+    <p class="warn" id="seqWarn"></p>
+  </section>
+
+  <section>
+    <h2>Encoding</h2>
+    <div class="ctl">
+      <div class="lab"><span>Phase steps (lines)</span><input type="number" id="nNy" min="8" max="256" step="2"></div>
+      <input type="range" id="rNy" min="8" max="256" step="2" aria-label="Phase steps">
+    </div>
+    <div class="ctl">
+      <div class="lab"><span>Max phase-table amplitude (mT/m)</span><input type="number" id="nPA" min="0" max="40" step="0.1"></div>
+      <input type="range" id="rPA" min="0" max="40" step="0.1" aria-label="Maximum phase-table amplitude">
+    </div>
+    <div class="ctl">
+      <div class="lab"><span>ADC dwell time (µs)</span><input type="number" id="nDw" min="5" max="200" step="1"></div>
+      <input type="range" id="rDw" min="5" max="200" step="1" aria-label="ADC dwell time">
+    </div>
+    <table class="read" id="encRead"></table>
+    <p class="sub">FOV = 1/Δk. Along x, Δk = γ̄·G<sub>x</sub>·dwell; along y, Δk is the table's largest step divided by half the number of lines. The voxel is FOV / matrix = 1/(2k<sub>max</sub>): the read gradient's area over the ADC, and the table's largest step.<br>
+      More phase steps keep the FOV (the table grows), so the voxel along y shrinks; a larger table amplitude at the same steps shrinks both FOV and voxel.
+      The ADC keeps its duration, so a shorter dwell gives more samples over a larger FOV at the same voxel size along x; to change it, lengthen the ADC or change G<sub>x</sub>.</p>
+  </section>
+
+  <section>
+    <h2>Imaging</h2>
+    <div class="ctl">
+      <div class="lab"><span>TR</span><input type="number" id="nTR" min="5" max="5000" step="1"></div>
+      <input type="range" id="rTR" min="0" max="1000" step="1">
+    </div>
+    <div class="ctl">
+      <div class="lab"><span>TI (inversion time)</span><input type="number" id="nTI" min="5" max="5000" step="1"></div>
+      <input type="range" id="rTI" min="0" max="1000" step="1" aria-label="Inversion time">
+      <p class="sub" id="tiNote" style="margin-top:4px"></p>
+    </div>
+    <div class="sel">
+      <label for="phantom">Phantom</label>
+      <select id="phantom"><option value="head">Head</option><option value="abdomen">Abdomen</option></select>
+    </div>
+    <div class="row">
+      <label class="chk"><input type="checkbox" id="cT1" checked>T1</label>
+      <label class="chk"><input type="checkbox" id="cT2" checked>T2</label>
+      <label class="chk"><input type="checkbox" id="cT2s" checked>T2′</label>
+    </div>
+    <div class="ctl">
+      <div class="lab"><span>T2′ (field inhomogeneity)</span><span class="val" id="vT2p"></span></div>
+      <input type="range" id="rT2p" min="5" max="200" step="1">
+    </div>
+    <p class="sub">Readout along x (left–right), phase encoding along y (anterior–posterior), so the image is axial. The sequence repeats once per phase step, every TR, with ideal spoiling at the end of each TR.</p>
+  </section>
+
+  <section>
+    <h2>Display</h2>
+    <div class="ctl">
+      <div class="lab"><span>Image brightness</span><span class="val" id="vBright"></span></div>
+      <input type="range" id="rBright" min="-2" max="3" step="0.25">
+    </div>
+    <div class="row"><label class="chk"><input type="checkbox" id="cAuto">Scale image to its maximum</label></div>
+    <div class="row"><button class="sm" id="reset3d" type="button">Reset 3D view</button></div>
+  </section>
+
+  <section>
+    <h2>What to look for</h2>
+    <p class="note">An RF pulse played <b>during a gradient</b> excites only a slab, at the position where the Larmor frequency matches the pulse frequency; its thickness is the pulse bandwidth over the gradient. The second half of the slice gradient leaves spins dephased <b>through the slice</b>, so a <b>rewinder</b> is needed. A <b>prephaser</b> moves k-space to its edge so the readout crosses k = 0 mid-way (the gradient echo). A refocusing pulse inverts the phase accumulated before it, which forms a <b>spin echo</b>, and also reverses the sign of earlier gradient areas. Three pulses also store magnetisation along z and give a <b>stimulated echo</b>.</p>
+  </section>
+
+  <p class="credit" id="credit"></p>
+</div>
+
+<main>
+  <div id="tl">
+    <div class="palette" id="palette">
+      <span class="plab">Blocks</span>
+      <button class="chip" data-new="rf90" type="button"><span class="sw" style="background:var(--p0)"></span>RF 90°</button>
+      <button class="chip" data-new="rf180" type="button"><span class="sw" style="background:var(--p1)"></span>RF 180°</button>
+      <button class="chip" data-new="grad" type="button" title="Drag onto the Gz, Gy or Gx rail. A click adds it to the rail of the selected gradient (Gz if none)."><span class="sw" style="background:var(--grad)"></span>Gradient</button>
+      <button class="chip" data-new="gpe" type="button" title="A list of gradient steps, one per phase-encoding line. Drag onto the Gy rail."><span class="sw" style="background:var(--grad)"></span>Phase table</button>
+      <button class="chip" data-new="adc" type="button"><span class="sw" style="background:var(--adc)"></span>ADC</button>
+      <span class="sp"></span>
+      <button class="sm" id="gapBtn" type="button" aria-pressed="true" title="Compress long empty stretches of the time axis (shown hatched, with their real length)">Long pauses: compressed</button>
+      <button class="sm" id="delBtn" type="button" disabled>Delete</button>
+      <button class="sm" id="undoBtn" type="button" disabled>Undo</button>
+    </div>
+    <div id="tlwrap"><canvas id="tlc" aria-label="Pulse sequence timeline. Drag blocks to move them, drag their edges to change duration, drag the top of a gradient to change its amplitude."></canvas></div>
+  </div>
+  <div id="bottom">
+    <div class="pane" id="pane3">
+      <canvas id="c3"></canvas>
+      <div class="tag">Object and slices</div>
+      <div class="legend" id="legend3"></div>
+      <div class="hint">drag to rotate · scroll to zoom · double-click to reset</div>
+    </div>
+    <div class="pane" id="paneK">
+      <canvas id="cK"></canvas>
+      <div class="tag">k-space</div>
+      <div class="ktools">
+        <select id="kPath" title="Which coherence pathway to follow"></select>
+        <span>Line</span><input type="range" id="kLine" min="0" max="63" step="1" aria-label="Phase-encoding line"><span class="val" id="vLine"></span>
+      </div>
+      <div class="imginfo" id="kInfo"></div>
+    </div>
+    <div class="pane" id="paneI">
+      <canvas id="cI"></canvas>
+      <div class="tag">Image</div>
+      <div class="imgtools" id="imgView">
+        <button type="button" data-v="mag" aria-pressed="true">Magnitude</button>
+        <button type="button" data-v="phase" aria-pressed="false">Phase</button>
+        <button type="button" data-v="k" aria-pressed="false">k-space</button>
+        <select id="adcSel" title="Which ADC event to reconstruct" style="width:auto; padding:1px 4px; font-size:10.5px" hidden></select>
+      </div>
+      <div class="busy" id="busy" hidden>Simulating…</div>
+      <div class="imginfo" id="imgInfo"></div>
+    </div>
+  </div>
+</main>
+<div id="ghost" hidden></div>
+
+<div id="about" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="aboutTitle">
+    <h3 id="aboutTitle">Build sim</h3>
+    <p class="by"></p>
+    <p class="note">
+      A teaching aid, not a quantitative simulator. Students assemble a sequence from a few building
+      blocks — RF pulses, trapezoidal gradients on three axes, a phase-encoding table and ADC events —
+      and see which slab each pulse acts on and the image the sequence produces. The point is which
+      components are needed and why (slice selection, rewinders, prephasers, phase encoding,
+      refocusing), not realistic timing.
+    </p>
+    <p class="note">
+      <b>Signal model.</b> Each RF pulse is an instantaneous rotation at its centre, acting with its
+      full flip angle inside its slab and not at all outside it (ideal rectangular profile). The slab
+      lies where the RF frequency equals the Larmor offset from the gradient at the pulse centre,
+      f = γ̄ G·r; its thickness is the bandwidth (time–bandwidth product 4) divided by γ̄|G|.
+      Between pulses the magnetisation is followed as coherence pathways (the extended phase graph
+      idea): each pathway carries a gradient moment k = γ̄∫G dt and a dephasing time τ, and each
+      pulse splits it into transverse (+, −) and longitudinal parts. All pathways are added, so spin,
+      stimulated and gradient echoes, and their unwanted cousins, appear by themselves. A pathway
+      that is still in the transverse plane at readout contributes the 3D Fourier transform of the
+      object it came from, evaluated at its own k at every ADC sample, so an unrewound slice gradient
+      dephases the signal through the slab and a wrong prephaser moves the echo.
+    </p>
+    <p class="note">
+      <b>Simplifications.</b> Ideal rectangular slice profiles, no off-resonance during RF, no
+      chemical shift, no diffusion, no B₀ map: field inhomogeneity is a Lorentzian line (T2′), so a
+      pathway is weighted by e<sup>−|τ|/T2′</sup>. T2 decay is taken at the centre of each ADC
+      event. The sequence is repeated once per phase-encoding line with ideal spoiling at the end of
+      every TR, and the longitudinal magnetisation is in its steady state. The matrix and FOV follow from the
+      sequence (dwell time, read gradient, number of phase steps and the table's amplitude); readout is along x and phase encoding along y. The phantom (from Seqret)
+      is sampled on a 128 × 128 grid in-plane and integrated through the slab.
+    </p>
+    <div id="changelog"></div>
+    <button class="themebtn" id="aboutClose" type="button">Close</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+const VERSION = "0.6.2";
+const AUTHORS = "Designed by Filip Sz (Lund University) and coded by Claude (Anthropic)";
+const CHANGELOG = [
+  ["0.6.2", "2026-11-01", "The toggle for compressing long pauses on the time axis now states its setting (compressed or true scale)."],
+  ["0.6.1", "2026-11-01", "Examples assume ideal RF: crushers removed from the spin echo, double spin echo and inversion recovery examples (and the spoiler after the inversion). Shorter echo times: TE 8 ms for the spin echoes and 18 ms for the double spin echo. The stimulated echo keeps its gradients, which select the pathway rather than correct the RF."],
+  ["0.6.0", "2026-11-01", "Inversion recovery spin echo example and a TI control (moves the excitation and everything after it). The time axis compresses long empty stretches into hatched breaks labelled with their duration (toggle above the sequence), so a long TI or TE no longer squashes the sequence. Box-select by dragging on empty rail space, and Ctrl/Cmd-A selects all."],
+  ["0.5.1", "2026-11-01", "The image is shown in a fixed window around the object, so the object keeps its size and voxel changes show as blockiness; the FOV is outlined and the area outside it hatched. Changing the number of phase steps now keeps the FOV (the phase table is scaled), so it changes the resolution along y."],
+  ["0.5.0", "2026-11-01", "Encoding controls: number of phase steps, the phase table's maximum amplitude and the ADC dwell time. Matrix, FOV and voxel size now follow from the sequence (FOV = 1/Δk, voxel = 1/2k_max) instead of a fixed 64 × 64 over 240 mm: the image is reconstructed on that grid and shown at a common physical scale with its pixels visible, the imaged slab in the 3D view takes the FOV with the voxel grid drawn on it, and the k-space pane shows the encoded grid."],
+  ["0.4.0", "2026-11-01", "Several blocks can be selected with Ctrl/Cmd-click and moved together in time by dragging any of them or with the arrow keys; Delete removes them all."],
+  ["0.3.1", "2026-11-01", "One Gradient block that takes the axis of the rail it is dropped on, and a separate Phase table block (one step per line, Gy only). A phase table keeps its rail when dragged."],
+  ["0.3.0", "2026-11-01", "RF frequency offset up to ±50 kHz. Moving a block snaps its centre to the centre of another block or to a nominal echo (teal guide). Gradients are split at every RF centre and at each nominal echo (the ADC sample where the reconstruction puts k = 0, marked on the ADC), with the area of each piece written under the gradient and listed in the inspector, so rewinders and prephasers can be designed by matching areas. RF and ADC inspectors give the area before and after the pulse centre and from the start of the read gradient to the echo."],
+  ["0.2.0", "2026-11-01", "Slabs are drawn as translucent boxes in the 3D view. New k-space pane: the effective k of a chosen coherence pathway through the TR for a chosen phase-encoding line (jumps at refocusing pulses dotted), the ADC samples of every line, the region the reconstruction expects and the centre of k-space; the chosen line is highlighted on the phase table in the sequence. The sequence rails get more of the window."],
+  ["0.1.0", "2026-11-01", "First draft. Sequence timeline with RF, Gz, Gy, Gx and ADC rails; drag-and-drop blocks; RF with flip angle, frequency, phase and duration; trapezoid gradients with a phase-encoding table; examples for gradient echo, spin echo, stimulated echo and double spin echo. Coherence-pathway signal model with slab-selective pulses, echo markers on the timeline, 3D view of the Seqret phantom with each pulse's slab, and a 64 × 64 simulated image."]
+];
+const $ = id => document.getElementById(id);
+
+/* ==================== CONSTANTS ==================== */
+/* Units in the model: time ms, gradient mT/m, position mm, frequency kHz (RF offset), k in 1/m. */
+const GB = 42.577478e6;             // Hz/T, 1H
+const KF = GB * 1e-6;               // 1/m per (mT/m · ms)
+const TBW = 4;                      // time–bandwidth product of the sinc pulses
+const RAMP = 0.2;                   // ms, default ramp
+const DK0 = 1 / 0.24;               // 1/m, k-space step of a 240 mm FOV (examples and the Fit buttons)
+const NDEF = 64;                    // samples and phase steps of the examples
+const SNAP = 0.05;                  // ms
+const MAXPULSES = 8;
+
+/* ==================== PHANTOM (from Seqret) ==================== */
+/* mm; x = patient left, y = anterior, z = superior; B0 along z. Each region: ellipsoid, tissue, parent. */
+const TISSUES = { // T1, T2 in s at about 3 T
+  fat:    { pd: 0.9,  T1: 0.38, T2: 0.08 },
+  wm:     { pd: 0.70, T1: 0.83, T2: 0.08 },
+  gm:     { pd: 0.80, T1: 1.33, T2: 0.11 },
+  csf:    { pd: 1.00, T1: 4.0,  T2: 2.0 },
+  lesion: { pd: 0.85, T1: 1.6,  T2: 0.20 },
+  blood:  { pd: 0.85, T1: 1.65, T2: 0.15 },
+  muscle: { pd: 0.75, T1: 1.40, T2: 0.05 },
+  liver:  { pd: 0.80, T1: 0.80, T2: 0.04 },
+  kidney: { pd: 0.85, T1: 1.20, T2: 0.07 },
+  fluid:  { pd: 1.00, T1: 3.0,  T2: 1.0 },
+  marrow: { pd: 0.90, T1: 0.50, T2: 0.06 }
+};
+const TNAMES = Object.keys(TISSUES), NT = TNAMES.length;
+const PHANTOMS = {
+  head: {
+    L: 260, view: [0, 8, -22], ext: 130,
+    regions() {
+      const s = 110, E = (x, y, z, a, b, c, phi, th, psi) => ({ c: [x * s, y * s, z * s], ax: [a * s, b * s, c * s], eul: [phi || 0, th || 0, psi || 0] });
+      return [
+        [E(0, 0, 0, 0.69, 0.92, 0.81), 'fat', -1],
+        [E(0, -0.0184, 0, 0.6624, 0.874, 0.78), 'wm', 0],
+        [E(0.22, 0, 0, 0.11, 0.31, 0.22, -18, 0, 10), 'csf', 1],
+        [E(-0.22, 0, 0, 0.16, 0.41, 0.28, 18, 0, 10), 'csf', 1],
+        [E(0, 0.35, -0.15, 0.21, 0.25, 0.41), 'gm', 1],
+        [E(0, 0.1, 0.25, 0.046, 0.046, 0.05), 'lesion', 1],
+        [E(0, -0.1, 0.25, 0.046, 0.046, 0.05), 'lesion', 1],
+        [E(-0.08, -0.605, 0, 0.046, 0.023, 0.05), 'gm', 1],
+        [E(0, -0.606, 0, 0.023, 0.023, 0.02), 'gm', 1],
+        [E(0.06, -0.605, 0, 0.023, 0.046, 0.02), 'gm', 1],
+        [{ c: [0, -90, 0], ax: [4, 4, 60], eul: [0, 0, 0] }, 'blood', 1],
+        [{ c: [0, 98, -34], ax: [11, 11, 18], eul: [0, 0, 0] }, 'muscle', -1, 0.05],
+        [{ c: [0, -15, -94], ax: [42, 46, 18], eul: [0, 0, 0] }, 'muscle', -1, 0.012],
+        [{ c: [0, -14, -80], ax: [15, 17, 28], eul: [0, 0, 0] }, 'gm', -1, 0.03]
+      ];
+    }
+  },
+  abdomen: {
+    L: 400, view: [0, 0, 0], ext: 190,
+    regions() {
+      const E = (x, y, z, a, b, c, phi) => ({ c: [x, y, z], ax: [a, b, c], eul: [phi || 0, 0, 0] });
+      return [
+        [E(0, 0, 0, 170, 120, 260), 'fat', -1],
+        [E(0, -2, 0, 157, 107, 255), 'muscle', 0],
+        [E(-60, 45, 20, 70, 40, 80, 15), 'liver', 1],
+        [E(-48, 38, 5, 10, 14, 30, 20), 'fluid', 2],
+        [E(58, 48, 40, 34, 24, 50, -10), 'fluid', 1],
+        [E(75, -40, -30, 34, 42, 70, -20), 'fat', 1],
+        [E(75, -40, -30, 22, 32, 55, -20), 'kidney', 5],
+        [E(-75, -40, -40, 34, 42, 70, 20), 'fat', 1],
+        [E(-75, -40, -40, 22, 32, 55, 20), 'kidney', 7],
+        [E(0, -72, 0, 20, 15, 245), 'marrow', 1],
+        [E(0, -96, 0, 8, 6, 245), 'csf', 1],
+        [E(-22, -48, 0, 9, 9, 245), 'blood', 1]
+      ];
+    }
+  }
+};
+function eulerA(eul) {
+  const [f, t, p] = eul.map(d => d * Math.PI / 180), cf = Math.cos(f), sf = Math.sin(f), ct = Math.cos(t), st = Math.sin(t), cp = Math.cos(p), sp = Math.sin(p);
+  return [[cp * cf - ct * sf * sp, cp * sf + ct * cf * sp, sp * st], [-sp * cf - ct * sf * cp, -sp * sf + ct * cf * cp, cp * st], [st * sf, -st * cf, ct]];
+}
+function inv3(A) {
+  const [a, b, c] = A[0], [d, e, f] = A[1], [g, h, i] = A[2], D = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+  return [[(e * i - f * h) / D, (c * h - b * i) / D, (b * f - c * e) / D], [(f * g - d * i) / D, (a * i - c * g) / D, (c * d - a * f) / D], [(d * h - e * g) / D, (b * g - a * h) / D, (a * e - b * d) / D]];
+}
+const PH_CACHE = {};
+function phantom(key) {
+  if (PH_CACHE[key]) return PH_CACHE[key];
+  const P = PHANTOMS[key];
+  const R = P.regions().map(([e, tissue, parent, vis]) => {
+    const A = eulerA(e.eul), Q = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) for (let k = 0; k < 3; k++) Q[i][j] += A[k][i] * A[k][j] / (e.ax[k] * e.ax[k]);
+    const S = inv3(Q), ext = [0, 1, 2].map(i => Math.sqrt(S[i][i]));
+    return { c: e.c, Q, S, ext, tissue, tid: TNAMES.indexOf(tissue), parent, vis };
+  });
+  let z0 = Infinity, z1 = -Infinity;
+  for (const r of R) { z0 = Math.min(z0, r.c[2] - r.ext[2]); z1 = Math.max(z1, r.c[2] + r.ext[2]); }
+  return (PH_CACHE[key] = { key, R, L: P.L, view: P.view, ext: P.ext, zr: [z0, z1], maps: new Map() });
+}
+
+/* ==================== SEQUENCE MODEL ==================== */
+const P = { dwell: 50, ny: NDEF, kLine: 44, kPath: 0, TR: 50, phantom: 'head', t1: true, t2: true, t2s: true, T2p: 40, view: 'mag', bright: 0, auto: false, adcSel: 0 };
+let EL = [], nextId = 1, selId = null;
+const SEL = new Set(); // selected blocks (Ctrl/Cmd-click adds or removes); selId is the one shown in the inspector
+const AXI = { x: 0, y: 1, z: 2 };
+const snapT = t => Math.round(t / SNAP) * SNAP;
+/* nominal echo of an ADC: the centre of sample N/2 + 1, where the reconstruction puts k = 0 */
+const adcDw = () => P.dwell * 1e-3;                                                        // ms
+const adcN = a => Math.max(4, Math.min(512, Math.floor(a.dur / adcDw() + 1e-6)));          // samples that fit in the ADC
+const echoTime = a => a.t + (Math.floor(adcN(a) / 2) + 0.5) * adcDw();
+/* times at which gradients are split for reporting areas: RF centres (design the rewinder) and nominal echoes
+   (design the prephaser) */
+function splitTimes() {
+  const out = [];
+  for (const e of EL) {
+    if (e.type === 'rf') out.push({ t: e.t, kind: 'rf', lab: `${fmt(e.flip)}° centre`, e });
+    else if (e.type === 'adc') out.push({ t: echoTime(e), kind: 'echo', lab: 'echo', e });
+  }
+  return out.sort((a, b) => a.t - b.t);
+}
+/* a gradient's area (mT·ms/m) in the pieces between its start, the split times inside it, and its end */
+function gradSegments(e, S = splitTimes()) {
+  const t0 = e.t, t1 = e.t + gTotal(e), cuts = S.filter(q => q.t > t0 + 1e-6 && q.t < t1 - 1e-6);
+  const pts = [{ t: t0, lab: 'start' }, ...cuts, { t: t1, lab: 'end' }], out = [];
+  for (let i = 0; i + 1 < pts.length; i++) out.push({ a: pts[i].t, b: pts[i + 1].t, from: pts[i], to: pts[i + 1], area: gCum(e, pts[i + 1].t) - gCum(e, pts[i].t) });
+  return out;
+}
+function centreOf(e) { return e.type === 'rf' ? e.t : e.type === 'adc' ? e.t + e.dur / 2 : e.t + gTotal(e) / 2; }
+
+function gTotal(e) { return 2 * e.ramp + e.flat; }
+function elStart(e) { return e.type === 'rf' ? e.t - e.dur / 2 : e.t; }
+function elEnd(e) { return e.type === 'rf' ? e.t + e.dur / 2 : e.type === 'adc' ? e.t + e.dur : e.t + gTotal(e); }
+/* cumulative area (mT/m·ms) of a trapezoid from its start to t */
+function gCum(e, t) {
+  const u = t - e.t, r = e.ramp, f = e.flat, A = e.amp;
+  if (u <= 0) return 0;
+  if (u < r) return A * u * u / (2 * r);
+  if (u < r + f) return A * (r / 2 + (u - r));
+  if (u < 2 * r + f) { const v = u - r - f; return A * (r / 2 + f + v - v * v / (2 * r)); }
+  return A * (r + f);
+}
+function gVal(e, t) {
+  const u = t - e.t, r = e.ramp, f = e.flat;
+  if (u <= 0 || u >= 2 * r + f) return 0;
+  if (u < r) return e.amp * u / r;
+  if (u <= r + f) return e.amp;
+  return e.amp * (2 * r + f - u) / r;
+}
+/* gradient moments γ̄∫G dt (1/m) between a and b, split into fixed gradients and the phase table (full scale) */
+function moment(grads, a, b) {
+  const mf = [0, 0, 0], mt = [0, 0, 0];
+  if (b <= a) return { mf, mt };
+  for (const e of grads) { const d = (gCum(e, b) - gCum(e, a)) * KF; (e.table ? mt : mf)[AXI[e.axis]] += d; }
+  return { mf, mt };
+}
+/* slab of an RF pulse from the fixed gradients at its centre */
+function pulseInfo(e, grads) {
+  const G = [0, 0, 0];
+  for (const g of grads) if (!g.table) G[AXI[g.axis]] += gVal(g, e.t);
+  const Gm = Math.hypot(G[0], G[1], G[2]), bw = TBW / (e.dur * 1e-3); // Hz
+  const base = { alpha: e.flip * Math.PI / 180, phi: e.phase * Math.PI / 180, bw, G, Gm };
+  if (Gm < 0.05) return { ...base, sel: false };
+  const n = G.map(v => v / Gm), gHz = GB * Gm * 1e-3; // Hz/m
+  return { ...base, sel: true, n, s0: e.freq * 1e3 / gHz * 1e3, thick: bw / gHz * 1e3, pure: Math.abs(n[2]) > 0.9999 ? 2 : -1 };
+}
+function buildModel() {
+  const rfs = EL.filter(e => e.type === 'rf').sort((a, b) => a.t - b.t);
+  const grads = EL.filter(e => e.type === 'grad');
+  const adcs = EL.filter(e => e.type === 'adc').sort((a, b) => a.t - b.t);
+  let lastEnd = 0; for (const e of EL) lastEnd = Math.max(lastEnd, elEnd(e));
+  const TRe = Math.max(P.TR, lastEnd + 0.05);
+  const PU = rfs.map((e, i) => ({ e, i, col: i % 6, ...pulseInfo(e, grads) }));
+  const ev = [];
+  PU.forEach(p => ev.push({ t: p.e.t, k: 0, i: p.i }));
+  adcs.forEach((a, i) => ev.push({ t: a.t, k: 1, i }));
+  ev.push({ t: TRe, k: 2 });
+  ev.sort((a, b) => a.t - b.t || a.k - b.k);
+  let tp = 0;
+  for (const v of ev) { const m = moment(grads, tp, v.t); v.t0 = tp; v.dt = v.t - tp; v.mf = m.mf; v.mt = m.mt; tp = v.t; }
+  // readout moments relative to each ADC start, at the sample centres
+  // phase encoding: the table's full-scale k (all phase tables on y), and the step between lines
+  let tabA = 0; for (const g of grads) if (g.table && g.axis === 'y') tabA += g.amp * (g.flat + g.ramp);
+  const Ny = P.ny, kTab = Math.abs(tabA) * KF;
+  const RO = adcs.map(a => {
+    const n = adcN(a), dw = adcDw(), t = new Float64Array(n), kf = [0, 1, 2].map(() => new Float64Array(n)), kt = [0, 1, 2].map(() => new Float64Array(n));
+    for (let j = 0; j < n; j++) { t[j] = a.t + (j + 0.5) * dw; const m = moment(grads, a.t, t[j]); for (let q = 0; q < 3; q++) { kf[q][j] = m.mf[q]; kt[q][j] = m.mt[q]; } }
+    // readout encoding: Δk between samples from the read gradient at the nominal echo
+    const te = echoTime(a); let Gx = 0; for (const g of grads) if (g.axis === 'x' && !g.table) Gx += gVal(g, te);
+    return { a, n, dw, t, kf, kt, jc: Math.floor(n / 2), te, Gx, dkx: KF * Math.abs(Gx) * dw };
+  });
+  const dky0 = kTab / (Ny / 2);
+  for (const ro of RO) { // the reconstruction grid; a missing gradient borrows the other axis's step (or 240 mm)
+    ro.noRead = !(ro.dkx > 1e-6); ro.noPE = !(dky0 > 1e-6);
+    ro.gx = ro.noRead ? (ro.noPE ? DK0 : dky0) : ro.dkx; ro.gy = ro.noPE ? ro.gx : dky0;
+  }
+  return { rfs, grads, adcs, PU, ev, TRe, lastEnd, RO, Ny, kTab };
+}
+
+/* ==================== COHERENCE PATHWAYS ====================
+   Terms of M+ (s = +1), of M− = conj(M+) (s = −1) and of Mz (s = 0), each a·e^{−i2π(k·r + Δf τ)}.
+   Gradients: + terms k += m, τ += dt; − terms k −= m, τ −= dt; z terms unchanged. An RF pulse (flip α,
+   phase φ) mixes the three linearly:
+     M+' = c² M+ + e^{2iφ} s² M− − i e^{iφ} sinα Mz
+     M−' = e^{−2iφ} s² M+ + c² M− + i e^{−iφ} sinα Mz
+     Mz' = −(i/2) e^{−iφ} sinα M+ + (i/2) e^{iφ} sinα M− + cosα Mz,   c = cos(α/2), s = sin(α/2).
+   M+ is the sum of the + terms. Terms with the same state, k and τ are merged. */
+function term(s, re, im, kf, kt, tau, h) { return { s, re, im, kf, kt, tau, h }; }
+function mergeTerms(list) {
+  const map = new Map(), out = [];
+  for (const q of list) {
+    if (Math.abs(q.re) + Math.abs(q.im) < 1e-9) continue;
+    const key = q.s + '|' + q.kf.map(v => Math.round(v * 100)).join(',') + '|' + q.kt.map(v => Math.round(v * 100)).join(',') + '|' + Math.round(q.tau * 1e5);
+    const o = map.get(key);
+    if (o) { if (Math.hypot(q.re, q.im) > Math.hypot(o.re, o.im)) o.h = q.h; o.re += q.re; o.im += q.im; }
+    else { map.set(key, q); out.push(q); }
+  }
+  return out.filter(q => Math.abs(q.re) + Math.abs(q.im) > 1e-8);
+}
+function rfApply(terms, a, phi, ch) {
+  const c2 = Math.cos(a / 2) ** 2, s2 = Math.sin(a / 2) ** 2, sa = Math.sin(a), ca = Math.cos(a);
+  const e1r = Math.cos(phi), e1i = Math.sin(phi), e2r = Math.cos(2 * phi), e2i = Math.sin(2 * phi);
+  const out = [];
+  const push = (s, re, im, q) => out.push(term(s, re, im, q.kf.slice(), q.kt.slice(), q.tau, q.h + (s > 0 ? '+' : s < 0 ? '-' : 'z')));
+  for (const q of terms) {
+    const x = q.re, y = q.im;
+    if (q.s === 1) {
+      push(1, c2 * x, c2 * y, q);
+      push(-1, s2 * (e2r * x + e2i * y), s2 * (e2r * y - e2i * x), q);           // s² e^{−2iφ} A
+      const br = e1r * x + e1i * y, bi = e1r * y - e1i * x;                       // e^{−iφ} A
+      push(0, 0.5 * sa * bi, -0.5 * sa * br, q);                                  // −(i/2) sinα (…)
+    } else if (q.s === -1) {
+      push(1, s2 * (e2r * x - e2i * y), s2 * (e2r * y + e2i * x), q);             // s² e^{2iφ} A
+      push(-1, c2 * x, c2 * y, q);
+      const br = e1r * x - e1i * y, bi = e1r * y + e1i * x;                       // e^{iφ} A
+      push(0, -0.5 * sa * bi, 0.5 * sa * br, q);                                  // (i/2) sinα (…)
+    } else {
+      const br = e1r * x - e1i * y, bi = e1r * y + e1i * x;                       // e^{iφ} A
+      push(1, sa * bi, -sa * br, q);                                              // −i sinα e^{iφ} A
+      const cr = e1r * x + e1i * y, ci = e1r * y - e1i * x;                       // e^{−iφ} A
+      push(-1, -sa * ci, sa * cr, q);                                             // i sinα e^{−iφ} A
+      push(0, ca * x, ca * y, q);
+    }
+  }
+  return mergeTerms(out);
+}
+/* one TR. flips[i]: flip of pulse i where it acts (0 = not acting). T1, T2 in ms (Infinity = off).
+   Returns the k = 0 longitudinal magnetisation at the end of TR, the + terms at each ADC start,
+   and (if rec) the spin-echo crossings τ = 0 of + terms. */
+function runSim(M, flips, T1, T2, mz0, rec) {
+  let terms = [term(0, mz0, 0, [0, 0, 0], [0, 0, 0], 0, '')], nPassed = 0, zEnd = 0;
+  const snaps = [], echoes = rec ? [] : null;
+  for (const v of M.ev) {
+    if (rec) for (const q of terms) if (q.s === 1 && q.tau < -1e-6) {
+      const ts = v.t0 - q.tau;
+      if (ts <= v.t + 1e-9) { const m = moment(M.grads, v.t0, ts); echoes.push({ t: ts, amp: Math.hypot(q.re, q.im), h: q.h, k: q.kf.map((x, a) => x + m.mf[a]) }); }
+    }
+    if (v.dt > 0) {
+      const E1 = isFinite(T1) ? Math.exp(-v.dt / T1) : 1, E2 = isFinite(T2) ? Math.exp(-v.dt / T2) : 1;
+      for (const q of terms) {
+        if (q.s === 0) { q.re *= E1; q.im *= E1; continue; }
+        const s = q.s; for (let a = 0; a < 3; a++) { q.kf[a] += s * v.mf[a]; q.kt[a] += s * v.mt[a]; }
+        q.tau += s * v.dt; q.re *= E2; q.im *= E2;
+      }
+      if (E1 < 1) terms.push(term(0, 1 - E1, 0, [0, 0, 0], [0, 0, 0], 0, 'z'.repeat(nPassed)));
+      terms = mergeTerms(terms);
+    }
+    if (v.k === 0) {
+      const a = flips[v.i];
+      if (a) terms = rfApply(terms, a, M.PU[v.i].phi);
+      else for (const q of terms) q.h += '·'; // keep one history character per pulse
+      nPassed++;
+    } else if (v.k === 1) {
+      snaps[v.i] = terms.filter(q => q.s === 1).map(q => ({ ...q, kf: q.kf.slice(), kt: q.kt.slice() }));
+    } else {
+      for (const q of terms) if (q.s === 0 && Math.hypot(...q.kf) < 1e-2 && Math.hypot(...q.kt) < 1e-2)
+        zEnd += q.re * (P.t2s ? Math.exp(-Math.abs(q.tau) / P.T2p) : 1);
+    }
+  }
+  return { zEnd, snaps, echoes };
+}
+/* longitudinal steady state before the first pulse of a TR */
+function steadyMz(M, flips, T1, T2) {
+  if (!isFinite(T1)) return 1;
+  const a = runSim(M, flips, T1, T2, 0).zEnd, b = runSim(M, flips, T1, T2, 1).zEnd - a;
+  return Math.abs(1 - b) > 1e-9 ? a / (1 - b) : 1;
+}
+/* label of an echo pathway from its history: one character per pulse ('+', '-', 'z', '·' = not acting) */
+function pathLabel(h) {
+  const s = h.replace(/·/g, ''); const e = s.search(/[+-]/); if (e < 0) return null;
+  const tail = s.slice(e);
+  if (tail.includes('z')) return 'STE';
+  let n = 0; for (let i = 1; i < tail.length; i++) if (tail[i] !== tail[i - 1]) n++;
+  return n === 0 ? 'FID' : n === 1 ? 'SE' : n === 2 ? 'DSE' : n + '×SE';
+}
+function excIndex(h) { for (let i = 0; i < h.length; i++) if (h[i] === '+' || h[i] === '-') return i; return -1; }
+
+/* ==================== ANALYSIS (every edit) ==================== */
+let MODEL = null, AN = null;
+function analyze() {
+  const M = MODEL = buildModel();
+  const flips = M.PU.map(p => p.alpha);
+  const r = runSim(M, flips, Infinity, Infinity, 1, true);
+  const se = [];
+  for (const e of r.echoes) {
+    if (e.amp < 0.02) continue;
+    const lab = pathLabel(e.h); if (!lab || lab === 'FID') continue;
+    const ei = excIndex(e.h), tE = ei >= 0 ? M.PU[ei].e.t : 0;
+    // dephased by gradients at the echo: outside the sampled k-space in-plane, or more than one cycle across the slab
+    const pe = ei >= 0 ? M.PU[ei] : null, thk = pe && pe.sel ? pe.thick : 20;
+    const kLim = Math.max(DK0 * NDEF / 2, ...M.RO.map(ro => Math.max(ro.n / 2 * ro.gx, M.Ny / 2 * ro.gy)));
+    const deph = Math.hypot(e.k[0], e.k[1]) > 1.5 * kLim || Math.abs(e.k[2]) * thk * 1e-3 > 1;
+    se.push({ t: e.t, amp: e.amp, lab, TE: e.t - tE, deph });
+  }
+  // gradient echoes: where a + term's in-plane k passes 0 during an ADC (centre line, k_table = 0)
+  const ge = [];
+  M.RO.forEach((ro, ai) => {
+    for (const q of r.snaps[ai] || []) {
+      const amp = Math.hypot(q.re, q.im); if (amp < 0.02) continue;
+      const kx = j => q.kf[0] + ro.kf[0][j], ky = j => q.kf[1] + ro.kf[1][j];
+      let best = -1, bt = 0, bmin = Infinity;
+      for (let j = 0; j < ro.n; j++) {
+        const v = Math.hypot(kx(j), ky(j)); if (v < bmin) { bmin = v; best = j; bt = ro.t[j]; }
+        if (j && kx(j - 1) * kx(j) < 0) { // crossing: interpolate
+          const f = kx(j - 1) / (kx(j - 1) - kx(j)), y = ky(j - 1) + f * (ky(j) - ky(j - 1));
+          if (Math.abs(y) < bmin) { bmin = Math.abs(y); best = j; bt = ro.t[j - 1] + f * ro.dw; }
+        }
+      }
+      if (bmin > 0.6 * ro.gx) continue;
+      const tau = q.tau + (bt - ro.a.t), jj = Math.min(ro.n - 1, Math.max(0, best));
+      const kz = q.kf[2] + ro.kf[2][jj], ei = excIndex(q.h), pe = ei >= 0 ? M.PU[ei] : null;
+      const thk = pe && pe.sel && pe.pure > 0 ? pe.thick : null;
+      const fac = thk ? Math.abs(sinc(kz * thk * 1e-3)) : 1;
+      ge.push({ t: bt, amp, ai, tau, kz, fac, lab: ({ FID: 'GRE' })[pathLabel(q.h)] || pathLabel(q.h) || 'GRE', TE: pe ? bt - pe.e.t : bt });
+    }
+  });
+  // pathways at the chosen ADC for the k-space pane, best echo first
+  const kp = [], ai = Math.min(P.adcSel, Math.max(0, M.adcs.length - 1)), ro = M.RO[ai];
+  for (const q of (ro && r.snaps[ai]) || []) {
+    const amp = Math.hypot(q.re, q.im); if (amp < 0.02) continue;
+    let bmin = Infinity; for (let j = 0; j < ro.n; j++) bmin = Math.min(bmin, Math.hypot(q.kf[0] + ro.kf[0][j], q.kf[1] + ro.kf[1][j]));
+    const ei = excIndex(q.h), pe = ei >= 0 ? M.PU[ei] : null, kz = q.kf[2] + ro.kf[2][ro.jc];
+    const fac = pe && pe.sel ? Math.abs(sinc(kz * pe.thick * 1e-3)) : 1, lab = ({ FID: 'GRE' })[pathLabel(q.h)] || pathLabel(q.h) || 'GRE';
+    kp.push({ q, amp, fac, kz, lab, score: amp * Math.max(fac, 0.05) * (bmin < 0.6 * ro.gx ? 1 : 0.3) });
+  }
+  kp.sort((a, b) => b.score - a.score);
+  AN = { se, ge, kp, ai };
+}
+const sinc = x => { if (Math.abs(x) < 1e-9) return 1; const p = Math.PI * x; return Math.sin(p) / p; };
+
+/* ==================== IMAGE SIMULATION ==================== */
+function fftPow2(re, im, inv) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) { let bit = n >> 1; for (; j & bit; bit >>= 1) j ^= bit; j ^= bit; if (i < j) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; } }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = (inv ? 2 : -2) * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang);
+    for (let i = 0; i < n; i += len) {
+      let cr = 1, ci = 0;
+      for (let j = 0; j < len / 2; j++) {
+        const a = i + j, b = a + len / 2, tr = re[b] * cr - im[b] * ci, ti = re[b] * ci + im[b] * cr;
+        re[b] = re[a] - tr; im[b] = im[a] - ti; re[a] += tr; im[a] += ti;
+        const nr = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = nr;
+      }
+    }
+  }
+}
+function fft2(re, im, n, inv) {
+  const r = new Float64Array(n), i = new Float64Array(n);
+  for (let pass = 0; pass < 2; pass++) for (let a = 0; a < n; a++) {
+    let any = false;
+    for (let b = 0; b < n; b++) { const o = pass ? b * n + a : a * n + b; r[b] = re[o]; i[b] = im[o]; if (r[b] || i[b]) any = true; }
+    if (!any) continue;
+    fftPow2(r, i, inv);
+    for (let b = 0; b < n; b++) { const o = pass ? b * n + a : a * n + b; re[o] = r[b]; im[o] = i[b]; }
+  }
+}
+/* centred inverse DFT: I[iy][ix] = Σ_l Σ_j S[l][j] e^{+i2π((j − Nx/2)(ix − Nx/2)/Nx + (l − Ny/2)(iy − Ny/2)/Ny)}, any size */
+function idft2(SR, SI, Ny, Nx) {
+  const pass = (inR, inI, nOut, nIn, rows, get, put) => { // 1D along one axis
+    const cs = new Float64Array(nIn), sn = new Float64Array(nIn); for (let m = 0; m < nIn; m++) { cs[m] = Math.cos(2 * Math.PI * m / nIn); sn[m] = Math.sin(2 * Math.PI * m / nIn); }
+    for (let r = 0; r < rows; r++) for (let o = 0; o < nOut; o++) {
+      let ar = 0, ai = 0;
+      for (let j = 0; j < nIn; j++) { const m = ((((j - (nIn >> 1)) * (o - (nIn >> 1))) % nIn) + nIn) % nIn, q = get(r, j); ar += inR[q] * cs[m] - inI[q] * sn[m]; ai += inR[q] * sn[m] + inI[q] * cs[m]; }
+      const w = put(r, o); outR[w] = ar; outI[w] = ai;
+    }
+  };
+  let outR = new Float64Array(Ny * Nx), outI = new Float64Array(Ny * Nx);
+  pass(SR, SI, Nx, Nx, Ny, (r, j) => r * Nx + j, (r, o) => r * Nx + o);
+  const tR = outR, tI = outI; outR = new Float64Array(Ny * Nx); outI = new Float64Array(Ny * Nx);
+  pass(tR, tI, Ny, Ny, Nx, (c, l) => l * Nx + c, (c, o) => o * Nx + c);
+  return { re: outR, im: outI };
+}
+function lagrange4(t, o) { o[0] = -t * (t - 1) * (t - 2) / 6; o[1] = (t + 1) * (t - 1) * (t - 2) / 2; o[2] = -(t + 1) * t * (t - 2) / 2; o[3] = (t + 1) * t * (t - 1) / 6; }
+
+let NO = 128; // object grid in-plane (256 when the encoded resolution needs it)
+/* tissue index (or −1) at every in-plane pixel of plane z */
+function tissueMap(PH, z) {
+  const key = NO * 1e7 + Math.round(z * 100);
+  let m = PH.maps.get(key); if (m) return m;
+  const h = PH.L / NO; m = new Int8Array(NO * NO).fill(-1);
+  for (const r of PH.R) {
+    const dz = z - r.c[2]; if (Math.abs(dz) > r.ext[2]) continue;
+    const Q = r.Q;
+    const i0 = Math.max(0, Math.floor((r.c[0] - r.ext[0]) / h + NO / 2)), i1 = Math.min(NO - 1, Math.ceil((r.c[0] + r.ext[0]) / h + NO / 2));
+    const j0 = Math.max(0, Math.floor((r.c[1] - r.ext[1]) / h + NO / 2)), j1 = Math.min(NO - 1, Math.ceil((r.c[1] + r.ext[1]) / h + NO / 2));
+    const czz = Q[2][2] * dz * dz;
+    for (let j = j0; j <= j1; j++) {
+      const dy = (j - NO / 2) * h - r.c[1];
+      for (let i = i0; i <= i1; i++) {
+        const dx = (i - NO / 2) * h - r.c[0];
+        const v = Q[0][0] * dx * dx + 2 * Q[0][1] * dx * dy + Q[1][1] * dy * dy + 2 * dz * (Q[0][2] * dx + Q[1][2] * dy) + czz;
+        if (v <= 1) m[j * NO + i] = r.tid; // later regions win
+      }
+    }
+  }
+  if (PH.maps.size > 1500) PH.maps.clear();
+  PH.maps.set(key, m); return m;
+}
+/* sample positions through z (mm) with weights: fine inside slabs, coarse where non-selective pulses act */
+function zSamples(M, PH) {
+  const [z0, z1] = PH.zr, coarse = PH.key === 'abdomen' ? 4 : 2, ranges = [];
+  for (const p of M.PU) {
+    if (!p.alpha) continue;
+    if (!p.sel) { ranges.push({ a: z0, b: z1, step: coarse }); continue; }
+    const nz = p.n[2];
+    if (Math.abs(nz) < 1e-3) { ranges.push({ a: z0, b: z1, step: coarse }); continue; }
+    if (p.pure > 0) {
+      const za = (p.s0 - p.thick / 2) / nz, zb = (p.s0 + p.thick / 2) / nz;
+      ranges.push({ a: Math.min(za, zb), b: Math.max(za, zb), step: Math.min(coarse, p.thick / 6) });
+    } else {
+      const R = PH.L / Math.SQRT2, half = (p.thick / 2 + R * Math.sqrt(1 - nz * nz)) / Math.abs(nz), zc = p.s0 / nz;
+      ranges.push({ a: zc - half, b: zc + half, step: Math.min(coarse, p.thick / 4) });
+    }
+  }
+  const bp = [z0, z1];
+  for (const r of ranges) { if (r.a > z0 && r.a < z1) bp.push(r.a); if (r.b > z0 && r.b < z1) bp.push(r.b); }
+  bp.sort((a, b) => a - b);
+  let out = [];
+  for (let k = 0; k + 1 < bp.length; k++) {
+    const a = bp[k], b = bp[k + 1]; if (b - a < 1e-6) continue;
+    const mid = (a + b) / 2; let step = Infinity;
+    for (const r of ranges) if (mid >= r.a && mid <= r.b) step = Math.min(step, r.step);
+    if (!isFinite(step)) continue;
+    const n = Math.max(1, Math.ceil((b - a) / step)), dz = (b - a) / n;
+    for (let i = 0; i < n; i++) out.push({ z: a + (i + 0.5) * dz, dz });
+  }
+  if (out.length > 360) { // thin out evenly (keeps total weight)
+    const f = Math.ceil(out.length / 360), o2 = [];
+    for (let i = 0; i < out.length; i += f) { let w = 0; for (let k = i; k < Math.min(out.length, i + f); k++) w += out[k].dz; o2.push({ z: out[Math.min(out.length - 1, i + (f >> 1))].z, dz: w }); }
+    out = o2;
+  }
+  return out;
+}
+
+function simulateImage() {
+  const M = MODEL;
+  if (!M.adcs.length) return { error: 'No ADC event: add one on the ADC rail to acquire a signal.' };
+  if (!M.PU.some(p => p.alpha)) return { error: 'No RF pulse with a flip angle: nothing is excited.' };
+  if (M.PU.length > MAXPULSES) return { error: `At most ${MAXPULSES} RF pulses.` };
+  const t0 = performance.now();
+  const ai = Math.min(P.adcSel, M.adcs.length - 1), ro = M.RO[ai], adc = ro.a, Nx = ro.n, Ny = M.Ny;
+  const PH = phantom(P.phantom);
+  const kNeed = Math.max(Nx / 2 * ro.gx, Ny / 2 * ro.gy); NO = kNeed * 2 * PH.L * 1e-3 > 0.9 * 128 ? 256 : 128;
+  const h = PH.L / NO, npx = NO * NO;
+  const zs = zSamples(M, PH);
+  // per plane: tissue map and the mask of pulses acting at each pixel
+  const nP = M.PU.length, classOf = new Int16Array(1 << nP).fill(-1), classes = [], present = new Uint8Array(NT);
+  const planes = [];
+  for (const s of zs) {
+    const tm = tissueMap(PH, s.z), mk = new Uint8Array(npx);
+    let constBits = 0; const perPix = [];
+    M.PU.forEach((p, i) => {
+      if (!p.alpha) return;
+      if (!p.sel) constBits |= 1 << i;
+      else if (p.pure > 0) { if (Math.abs(s.z * p.n[2] - p.s0) <= p.thick / 2) constBits |= 1 << i; }
+      else perPix.push(i);
+    });
+    let any = false;
+    for (let o = 0; o < npx; o++) {
+      const t = tm[o]; if (t < 0) continue;
+      let m = constBits;
+      if (perPix.length) {
+        const x = ((o % NO) - NO / 2) * h, y = (Math.floor(o / NO) - NO / 2) * h;
+        for (const i of perPix) { const p = M.PU[i]; if (Math.abs(p.n[0] * x + p.n[1] * y + p.n[2] * s.z - p.s0) <= p.thick / 2) m |= 1 << i; }
+      }
+      mk[o] = m;
+      if (m) { any = true; present[t] = 1; if (classOf[m] < 0) { classOf[m] = classes.length; classes.push(m); } }
+    }
+    if (any) planes.push({ z: s.z, dz: s.dz, tm, mk });
+  }
+  if (!planes.length) return { error: 'No pulse acts on the object: the slabs miss it.' };
+  const nC = classes.length;
+  // pathways per (class, tissue), gathered into groups with equal k and τ
+  const groups = new Map(), E2c = t => P.t2 ? Math.exp(-(adc.dur / 2) / (TISSUES[TNAMES[t]].T2 * 1e3)) : 1;
+  classes.forEach((mask, ci) => {
+    const flips = M.PU.map((p, i) => (mask >> i) & 1 ? p.alpha : 0);
+    for (let t = 0; t < NT; t++) {
+      if (!present[t]) continue;
+      const T = TISSUES[TNAMES[t]], T1 = P.t1 ? T.T1 * 1e3 : Infinity, T2 = P.t2 ? T.T2 * 1e3 : Infinity;
+      const mz0 = steadyMz(M, flips, T1, T2), res = runSim(M, flips, T1, T2, mz0);
+      const sc = T.pd * E2c(t);
+      for (const q of res.snaps[ai] || []) {
+        const key = q.kf.map(v => Math.round(v * 100)).join(',') + '|' + q.kt.map(v => Math.round(v * 100)).join(',') + '|' + Math.round(q.tau * 1e5);
+        let g = groups.get(key);
+        if (!g) { g = { kf: q.kf, kt: q.kt, tau: q.tau, h: q.h, amp: new Float64Array(nC * NT * 2), max: 0 }; groups.set(key, g); }
+        const o = (ci * NT + t) * 2; g.amp[o] += q.re * sc; g.amp[o + 1] += q.im * sc;
+      }
+    }
+  });
+  // keep the groups that matter and reach the sampled part of k-space
+  const kObj = 1 / (2 * h * 1e-3);
+  let G = [...groups.values()];
+  for (const g of G) { let m = 0; for (let o = 0; o < g.amp.length; o += 2) m = Math.max(m, Math.hypot(g.amp[o], g.amp[o + 1])); g.max = m; }
+  const gmax = Math.max(1e-12, ...G.map(g => g.max));
+  G = G.filter(g => {
+    if (g.max < 1e-4 * gmax) return false;
+    for (const f of [-1, 0, 1]) for (let j = 0; j < Nx; j++) {
+      const kx = g.kf[0] + f * g.kt[0] + ro.kf[0][j] + f * ro.kt[0][j], ky = g.kf[1] + f * g.kt[1] + ro.kf[1][j] + f * ro.kt[1][j];
+      if (Math.abs(kx) < kObj && Math.abs(ky) < kObj) return true;
+    }
+    return false;
+  }).sort((a, b) => b.max - a.max).slice(0, 24);
+  // object of each group: Σ_z dz · amplitude(class, tissue) · e^{−i2π kz z}
+  const nG = G.length, MR = G.map(() => new Float64Array(npx)), MI = G.map(() => new Float64Array(npx));
+  const jc = ro.jc;
+  for (const pl of planes) {
+    const wr = new Float64Array(nG), wi = new Float64Array(nG);
+    G.forEach((g, p) => {
+      const kz = (g.kf[2] + ro.kf[2][jc]) * 1e-3, w = pl.dz * sinc(kz * pl.dz), ph = -2 * Math.PI * kz * pl.z;
+      wr[p] = w * Math.cos(ph); wi[p] = w * Math.sin(ph);
+    });
+    const { tm, mk } = pl;
+    for (let o = 0; o < npx; o++) {
+      const m = mk[o]; if (!m) continue;
+      const base = (classOf[m] * NT + tm[o]) * 2;
+      for (let p = 0; p < nG; p++) {
+        const ar = G[p].amp[base], ai2 = G[p].amp[base + 1]; if (!ar && !ai2) continue;
+        MR[p][o] += ar * wr[p] - ai2 * wi[p]; MI[p][o] += ar * wi[p] + ai2 * wr[p];
+      }
+    }
+  }
+  // FFT of each object (zero-padded 2×), then the signal at every sample
+  const P2 = 2 * NO, F = G.map((g, p) => {
+    const re = new Float64Array(P2 * P2), im = new Float64Array(P2 * P2);
+    for (let j = 0; j < NO; j++) for (let i = 0; i < NO; i++) {
+      const o = j * NO + i, q = (((j - NO / 2) + P2) % P2) * P2 + (((i - NO / 2) + P2) % P2);
+      re[q] = MR[p][o] * h * h; im[q] = MI[p][o] * h * h;
+    }
+    fft2(re, im, P2, false); return { re, im };
+  });
+  const SR = new Float64Array(Ny * Nx), SI = new Float64Array(Ny * Nx), LX = new Float64Array(4), LY = new Float64Array(4), bin = P2 * h * 1e-3;
+  for (let l = 0; l < Ny; l++) {
+    const f = (l - Ny / 2) / (Ny / 2);
+    for (let j = 0; j < Nx; j++) {
+      let sr = 0, si = 0;
+      for (let p = 0; p < nG; p++) {
+        const g = G[p];
+        const kx = g.kf[0] + f * g.kt[0] + ro.kf[0][j] + f * ro.kt[0][j], ky = g.kf[1] + f * g.kt[1] + ro.kf[1][j] + f * ro.kt[1][j];
+        const u = kx * bin, v = ky * bin; if (Math.abs(u) > P2 / 2 - 3 || Math.abs(v) > P2 / 2 - 3) continue;
+        const iu = Math.floor(u), iv = Math.floor(v); lagrange4(u - iu, LX); lagrange4(v - iv, LY);
+        let fr = 0, fi = 0;
+        for (let a = 0; a < 4; a++) {
+          const row = (((iv - 1 + a) % P2) + P2) % P2 * P2;
+          for (let b = 0; b < 4; b++) { const w = LY[a] * LX[b], o = row + ((((iu - 1 + b) % P2) + P2) % P2); fr += w * F[p].re[o]; fi += w * F[p].im[o]; }
+        }
+        const box = sinc(kx * h * 1e-3) * sinc(ky * h * 1e-3);
+        const tau = g.tau + (ro.t[j] - adc.t), d = (P.t2s ? Math.exp(-Math.abs(tau) / P.T2p) : 1) * box;
+        sr += fr * d; si += fi * d;
+      }
+      SR[l * Nx + j] = sr; SI[l * Nx + j] = si;
+    }
+  }
+  // reconstruction: inverse DFT on the grid the sequence encodes, k = (j − Nx/2)·Δkx, (l − Ny/2)·Δky;
+  // the image is then in mm of object (slab thickness × signal), Nx × Ny pixels over FOV = 1/Δk
+  const { re: imgR, im: imgI } = idft2(SR, SI, Ny, Nx), norm = ro.gx * ro.gy * 1e-6; // (1/mm)² per sample
+  for (let o = 0; o < Nx * Ny; o++) { imgR[o] *= norm; imgI[o] *= norm; }
+  // reference: slab thickness of the excitation (the first acting pulse), for a fixed brightness scale
+  const pe = M.PU.find(p => p.alpha);
+  const ref = pe.sel && pe.pure > 0 ? pe.thick : (pe.sel ? pe.thick : 100);
+  return { SR, SI, imgR, imgI, ref, nG, nPlanes: planes.length, nClasses: nC, ms: performance.now() - t0, ai, Nx, Ny, fovX: 1e3 / ro.gx, fovY: 1e3 / ro.gy, noRead: ro.noRead, noPE: ro.noPE };
+}
+
+/* ==================== PRESETS ==================== */
+const sliceG = (thk, dur) => TBW / (dur * 1e-3) / (GB * thk * 1e-3) * 1e3;         // mT/m
+const ADC_DUR = NDEF * 0.05;                                                          // 64 samples of 50 µs
+const readG = dw => DK0 / (KF * dw);                                                  // mT/m for a 240 mm FOV at dwell dw (ms)
+const echoArea = (Gr, n, dw) => Gr * RAMP / 2 + Gr * (Math.floor(n / 2) + 0.5) * dw; // ramp-up + up to sample n/2 + 1
+const PE_AREA = () => (P.ny / 2) * DK0 / KF;                                          // table, full scale, 240 mm FOV
+function addRF(t, flip, dur = 2, freq = 0, phase = 0) { EL.push({ id: nextId++, type: 'rf', t, flip, dur, freq, phase }); }
+function addG(axis, t, amp, flat, table = false, ramp = RAMP) { EL.push({ id: nextId++, type: 'grad', axis, t, amp, flat, ramp, table }); }
+function addADC(t, dur) { EL.push({ id: nextId++, type: 'adc', t, dur }); }
+/* slice-selective pulse centred at tc; returns the end of its gradient */
+function ssPulse(tc, flip, thk = 5, dur = 2) { addRF(tc, flip, dur); addG('z', tc - dur / 2 - RAMP, sliceG(thk, dur), dur); return tc + dur / 2 + RAMP; }
+function areaAmp(area, flat = 0.6) { return area / (flat + RAMP); }
+/* readout with the k = 0 sample centred at tk; returns the end of the read gradient */
+function readout(tk) {
+  const dw = ADC_DUR / NDEF, a0 = tk - (NDEF / 2 + 0.5) * dw;
+  addADC(a0, ADC_DUR); addG('x', a0 - RAMP, readG(dw), ADC_DUR);
+  return a0 + ADC_DUR + RAMP;
+}
+const r2 = v => Math.round(v * 100) / 100;
+function preset(name) {
+  EL = []; selId = null; SEL.clear(); UNDO.length = 0; P.dwell = 50; P.ny = NDEF;
+  const dw = ADC_DUR / NDEF, Gs = sliceG(5, 2), rew = -areaAmp(Gs * (1 + RAMP / 2)), Gr = readG(dw), pre = areaAmp(echoArea(Gr, NDEF, dw)), pe = areaAmp(PE_AREA());
+  const firstK = t => t + RAMP + (NDEF / 2 + 0.5) * dw; // k = 0 time of a readout starting its ramp at t
+  let note = '';
+  if (name === 'gre') {
+    const e = ssPulse(1.7, 30);
+    addG('z', e, rew, 0.6); addG('y', e, pe, 0.6, true); addG('x', e, -pre, 0.6);
+    const end = readout(firstK(e + 1.0));
+    addG('z', end, 20, 1.5);
+    P.TR = 50; note = 'Gradient echo: slice-selective 30° pulse, slice rewinder, phase encoding, read prephaser and readout, spoiler at the end.';
+  } else if (name === 'se') {
+    const e = ssPulse(1.7, 90);
+    addG('z', e, rew, 0.6); addG('y', e, pe, 0.6, true); addG('x', e, pre, 0.6);
+    const TE = 8, t180 = 1.7 + TE / 2;
+    ssPulse(t180, 180);
+    readout(1.7 + TE);
+    P.TR = 500; note = 'Spin echo: the read prephaser has the same sign as the readout because the 180° pulse inverts it. The 180° slice gradient needs no rewinder: its two halves cancel across the refocusing. The RF is ideal, so no crushers are needed.';
+  } else if (name === 'ste') {
+    const tau = 8, TM = 16, t1 = 1.7, t2 = t1 + tau, t3 = t2 + TM;
+    const e = ssPulse(t1, 90);
+    addG('z', e, rew, 0.6);                                  // slice rewinder
+    addG('z', e + 1.2, 15, 2);                               // crusher 1
+    ssPulse(t2, 90);
+    addG('x', t2 + 2, 20, 6);                                // spoiler during TM
+    const e3 = ssPulse(t3, 90);
+    addG('z', e3, 15, 2);                                    // crusher 2 (its slice half-lobe is cancelled by that of the second pulse)
+    addG('y', e3 + 2.4, pe, 0.6, true); addG('x', e3 + 2.4, -pre, 0.6);
+    readout(t3 + tau);
+    P.TR = 500; note = 'Stimulated echo: the first pulse excites, the second stores half of the dephased magnetisation along z, the third returns it. The stimulated echo appears τ after the third pulse. Crushers after the first and third pulses select it; the spoiler during TM removes the other echoes.';
+  } else if (name === 'dse') {
+    const tau = 4.5, t1 = 1.7, t2 = t1 + tau, t3 = t1 + 3 * tau, TE = 4 * tau;
+    const e = ssPulse(t1, 90);
+    addG('z', e, rew, 0.6);
+    for (const t of [t2, t3]) ssPulse(t, 180);
+    const tk = t1 + TE, dw2 = ADC_DUR / NDEF, a0 = tk - (NDEF / 2 + 0.5) * dw2;
+    addG('y', a0 - RAMP - 1.0 - 0.05, pe, 0.6, true); addG('x', a0 - RAMP - 1.0 - 0.05, -pre, 0.6);
+    readout(tk);
+    P.TR = 500; note = 'Double spin echo: the first 180° gives a spin echo at 2τ, the second refocuses it again at 4τ. The second refocusing inverts the encoding once more, so the read prephaser and phase table are placed after it. The RF is ideal, so no crushers are needed.';
+  } else if (name === 'irse') {
+    const TI = 500, tInv = 1.7;
+    const ei = ssPulse(tInv, 180, 10);                       // inversion, thicker slab than the imaged slice
+    const t1 = tInv + TI, e = ssPulse(t1, 90);
+    addG('z', e, rew, 0.6); addG('y', e, pe, 0.6, true); addG('x', e, pre, 0.6);
+    const TE = 8, t180 = t1 + TE / 2;
+    ssPulse(t180, 180);
+    readout(t1 + TE);
+    P.TR = 3000; note = 'Inversion recovery spin echo: a 180° inverts M_z, which recovers with T1 during TI before the spin echo reads it. Each tissue is nulled when its M_z crosses zero (white matter near TI ≈ 550 ms at TR 3000 ms); use the Phase view to see which tissues are still negative. The time axis is compressed across TI.';
+  } else note = 'Empty: drag an RF pulse onto the RF rail to start.';
+  for (const el of EL) { el.t = r2(el.t); if (el.type === 'grad') el.amp = r2(el.amp); }
+  $('presetNote').textContent = note;
+  document.querySelectorAll('#presets button').forEach(b => b.setAttribute('aria-pressed', b.dataset.preset === name));
+  P.adcSel = 0; P.kPath = 0; P.kLine = 44;
+  syncGlobal(); TL.frozen = null; changed(true);
+}
+
+/* ==================== UNDO ==================== */
+const UNDO = [];
+function snapshot() { UNDO.push(JSON.stringify({ EL, TR: P.TR, ny: P.ny, dwell: P.dwell })); if (UNDO.length > 60) UNDO.shift(); $('undoBtn').disabled = false; }
+function undo() {
+  const s = UNDO.pop(); if (!s) return; const o = JSON.parse(s); EL = o.EL; P.TR = o.TR; P.ny = o.ny ?? P.ny; P.dwell = o.dwell ?? P.dwell;
+  nextId = Math.max(0, ...EL.map(e => e.id)) + 1; if (!EL.some(e => e.id === selId)) selId = null; for (const id of [...SEL]) if (!EL.some(e => e.id === id)) SEL.delete(id);
+  $('undoBtn').disabled = !UNDO.length; syncGlobal(); changed(true); buildInspector();
+}
+
+/* ==================== TIMELINE ==================== */
+const tlc = $('tlc'), tctx = tlc.getContext('2d');
+const ROWS = [['echo', 26, 'Echoes', ''], ['rf', 68, 'RF', ''], ['z', 56, 'Gz', 'slice'], ['y', 56, 'Gy', 'phase'], ['x', 56, 'Gx', 'read'], ['adc', 40, 'ADC', '']];
+const TL = { W: 0, H: 0, GL: 84, rows: [], v0: 0, span: 20, frozen: null, ghost: null };
+function layoutRows(H) { // echo row fixed, the rails share what is left
+  const base = ROWS.slice(1).reduce((a, r) => a + r[1], 0), f = Math.max(1, (H - 6 - 24 - ROWS[0][1]) / base);
+  let y = 6; TL.rows = ROWS.map(([k, h, l, s], i) => { const hh = i ? Math.floor(h * f) : h, r = { k, h: hh, l, s, y }; y += hh; return r; });
+  TL.axisY = y; TL.H = y + 24;
+}
+layoutRows(0);
+const rowOf = k => TL.rows.find(r => r.k === k);
+let CS = {};
+function readCSS() { const s = getComputedStyle(document.documentElement); for (const k of ['bg', 'panel', 'panel2', 'line', 'text', 'muted', 'dim', 'ui', 'grid', 'grad', 'adc', 'echo', 'p0', 'p1', 'p2', 'p3', 'p4', 'p5']) CS[k] = s.getPropertyValue('--' + k).trim(); }
+const pcol = i => CS['p' + (i % 6)];
+/* time axis: piecewise linear from real time t to display time d. Long empty stretches (no block within 1 ms)
+   are compressed to a short hatched break, so a long TI or TE does not squash the rest of the sequence.
+   Occupied parts keep 1 ms of display per ms, so pxPerMs is the true scale there. The map is frozen while dragging. */
+TL.gaps = true; TL.map = { K: [[0, 0]], D: 20, breaks: [] };
+function buildMap(Tend) {
+  const PAD = 1, iv = EL.map(e => [Math.max(0, elStart(e) - PAD), Math.min(Tend, elEnd(e) + PAD)]).sort((a, b) => a[0] - b[0]), M = [];
+  for (const v of iv) { if (M.length && v[0] <= M[M.length - 1][1]) M[M.length - 1][1] = Math.max(M[M.length - 1][1], v[1]); else M.push(v.slice()); }
+  const occ = M.reduce((a, v) => a + v[1] - v[0], 0), Gth = Math.max(12, 0.4 * occ), gapsAt = [];
+  let cur = 0; for (const [a, b] of M) { if (TL.gaps && a - cur > Gth) gapsAt.push([cur, a]); cur = b; }
+  if (TL.gaps && Tend - cur > Gth) gapsAt.push([cur, Tend - 1]);
+  const lin = Tend - gapsAt.reduce((a, g) => a + g[1] - g[0], 0), Wp = Math.max(100, TL.W - TL.GL - 14);
+  const Gd = gapsAt.length ? Math.max(0.06 * lin, 34 * lin / Math.max(60, Wp - 34 * gapsAt.length)) : 0; // display length of a break, ≥ 34 px
+  const K = [[0, 0]], breaks = []; let d = 0, t = 0;
+  for (const [a, b] of gapsAt) { d += a - t; K.push([a, d]); d += Gd; K.push([b, d]); breaks.push({ a, b }); t = b; }
+  d += Tend - t; K.push([Tend, d]);
+  return { K, D: d, breaks };
+}
+function tD(t) { const K = TL.map.K; let i = 1; while (i < K.length - 1 && t > K[i][0]) i++; const [t0, d0] = K[i - 1], [t1, d1] = K[i]; return t1 > t0 ? d0 + (t - t0) * (d1 - d0) / (t1 - t0) : d0 + (t - t0); }
+function dT(d) { const K = TL.map.K; let i = 1; while (i < K.length - 1 && d > K[i][1]) i++; const [t0, d0] = K[i - 1], [t1, d1] = K[i]; return d1 > d0 ? t0 + (d - d0) * (t1 - t0) / (d1 - d0) : t0 + (d - d0); }
+const pxPerMs = () => (TL.W - TL.GL - 14) / TL.map.D;
+function tX(t) { return TL.GL + tD(t) * pxPerMs(); }
+function xT(x) { return dT((x - TL.GL) / pxPerMs()); }
+const inBreak = t => TL.map.breaks.some(g => t > g.a + 1e-9 && t < g.b - 1e-9);
+function gScale() { let m = 10; for (const e of EL) if (e.type === 'grad') m = Math.max(m, Math.abs(e.amp)); return m * 1.08; }
+function sizeTL() {
+  const w = tlc.parentElement.clientWidth, d = devicePixelRatio || 1;
+  layoutRows(tlc.parentElement.clientHeight);
+  TL.W = w; tlc.style.height = TL.H + 'px';
+  if (tlc.width !== Math.round(w * d) || tlc.height !== Math.round(TL.H * d)) { tlc.width = Math.round(w * d); tlc.height = Math.round(TL.H * d); }
+  tctx.setTransform(d, 0, 0, d, 0, 0);
+}
+function niceStep(raw) { const p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p; return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p; }
+function hexA(c, a) { // css colour with alpha (hex only)
+  if (c[0] !== '#') return c; let h = c.slice(1); if (h.length === 3) h = h.split('').map(x => x + x).join('');
+  return `rgba(${parseInt(h.slice(0, 2), 16)},${parseInt(h.slice(2, 4), 16)},${parseInt(h.slice(4, 6), 16)},${a})`;
+}
+function rfColorOf(e) { const i = MODEL ? MODEL.PU.findIndex(p => p.e === e) : 0; return pcol(Math.max(0, i)); }
+function drawTL() {
+  const c = tctx, W = TL.W, H = TL.H; if (!W) return;
+  const last = MODEL ? MODEL.lastEnd : 0;
+  if (!TL.frozen) { TL.span = Math.max(12, Math.ceil((last + 2) / 2) * 2); TL.map = buildMap(TL.span); }
+  c.clearRect(0, 0, W, H); c.fillStyle = CS.bg; c.fillRect(0, 0, W, H);
+  // grid: ticks on the occupied stretches only
+  const step = niceStep(TL.map.D / Math.max(3, (W - TL.GL) / 90)), ticks = [];
+  for (let t = 0; t <= TL.span + 1e-9; t += step) if (!inBreak(t)) ticks.push(t);
+  c.strokeStyle = CS.grid; c.lineWidth = 1; c.beginPath();
+  for (const t of ticks) { const x = Math.round(tX(t)) + 0.5; c.moveTo(x, 6); c.lineTo(x, TL.axisY); }
+  c.stroke();
+  // breaks: hatched, with zigzag edges and the real duration
+  for (const g of TL.map.breaks) {
+    const xa = tX(g.a), xb = tX(g.b);
+    c.save(); c.beginPath(); c.rect(xa, 6, xb - xa, TL.axisY - 6); c.clip();
+    c.fillStyle = CS.panel2; c.fillRect(xa, 6, xb - xa, TL.axisY - 6);
+    c.strokeStyle = CS.grid; c.beginPath(); for (let u = xa - TL.axisY; u < xb; u += 7) { c.moveTo(u, TL.axisY); c.lineTo(u + TL.axisY, 0); } c.stroke();
+    c.restore();
+    c.strokeStyle = CS.muted; c.lineWidth = 1;
+    for (const x of [xa, xb]) { c.beginPath(); for (let y = 6, k = 0; y <= TL.axisY; y += 5, k++) { const xx = x + (k % 2 ? 2 : -2); if (y === 6) c.moveTo(xx, y); else c.lineTo(xx, y); } c.stroke(); }
+    c.save(); c.translate((xa + xb) / 2, (6 + TL.axisY) / 2); c.rotate(-Math.PI / 2);
+    c.fillStyle = CS.muted; c.font = `600 10px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace`; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillText(`${fmt(g.b - g.a)} ms`, 0, 0); c.restore();
+  }
+  // rows
+  c.font = `600 11.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace`; c.textBaseline = 'middle';
+  for (const r of TL.rows) {
+    c.strokeStyle = CS.line; c.beginPath(); c.moveTo(0, Math.round(r.y + r.h) + 0.5); c.lineTo(W, Math.round(r.y + r.h) + 0.5); c.stroke();
+    c.fillStyle = r.k === 'echo' ? CS.muted : CS.text; c.textAlign = 'left';
+    c.font = `${r.k === 'echo' ? 400 : 600} 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace`;
+    c.fillText(r.l, 12, r.y + r.h / 2 - (r.s ? 6 : 0));
+    if (r.s) { c.font = `400 10px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace`; c.fillStyle = CS.dim; c.fillText(r.s, 12, r.y + r.h / 2 + 8); }
+    if (r.k === 'x' || r.k === 'y' || r.k === 'z') { c.strokeStyle = CS.line; c.setLineDash([3, 3]); c.beginPath(); c.moveTo(TL.GL, Math.round(r.y + r.h / 2) + 0.5); c.lineTo(W, Math.round(r.y + r.h / 2) + 0.5); c.stroke(); c.setLineDash([]); }
+  }
+  c.strokeStyle = CS.line; c.beginPath(); c.moveTo(TL.GL - 0.5, 6); c.lineTo(TL.GL - 0.5, TL.axisY); c.stroke();
+  // time axis
+  c.fillStyle = CS.muted; c.font = `400 10.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace`; c.textAlign = 'center';
+  const dec = Math.max(0, -Math.floor(Math.log10(step) + 1e-9));
+  let lastX = -1e9; const lab = (t, x) => { if (x - lastX > 34) { c.fillText(fmt(+t.toFixed(Math.max(dec, 0))), x, TL.axisY + 11); lastX = x; } };
+  const marks = ticks.map(t => [t, tX(t)]); for (const g of TL.map.breaks) marks.push([g.b, tX(g.b)]); // label where each break ends
+  marks.sort((a, b) => a[1] - b[1]); for (const [t, x] of marks) lab(t, x);
+  c.textAlign = 'left'; c.fillText('ms', 12, TL.axisY + 11);
+  c.textAlign = 'right'; c.fillStyle = CS.dim; c.textBaseline = 'middle';
+  c.fillText(P.TR > TL.span ? `TR ${fmt(P.TR)} ms →` : `TR ${fmt(P.TR)} ms`, W - 10, rowOf('echo').y + 9);
+  if (P.TR <= TL.span && !inBreak(P.TR)) { const x = tX(P.TR); c.strokeStyle = CS.muted; c.setLineDash([2, 4]); c.beginPath(); c.moveTo(x, 6); c.lineTo(x, TL.axisY); c.stroke(); c.setLineDash([]); }
+  // echo guide lines
+  if (AN) {
+    c.save(); c.globalAlpha = 0.35; c.strokeStyle = CS.echo; c.setLineDash([2, 3]);
+    for (const e of AN.se) { if (e.deph) continue; const x = Math.round(tX(e.t)) + 0.5; c.beginPath(); c.moveTo(x, rowOf('echo').y + 18); c.lineTo(x, TL.axisY); c.stroke(); }
+    c.restore();
+  }
+  // split times: RF centres and nominal echoes, across the gradient rails
+  const S = splitTimes(), gy0 = rowOf('z').y, gy1 = rowOf('x').y + rowOf('x').h;
+  c.save(); c.setLineDash([3, 3]);
+  for (const q of S) {
+    const x = Math.round(tX(q.t)) + 0.5; c.strokeStyle = q.kind === 'rf' ? hexA(rfColorOf(q.e), 0.55) : hexA(CS.adc, 0.7);
+    c.beginPath(); c.moveTo(x, q.kind === 'rf' ? rowOf('rf').y + 4 : gy0); c.lineTo(x, q.kind === 'rf' ? gy1 : rowOf('adc').y + rowOf('adc').h - 4); c.stroke();
+  }
+  c.restore();
+  if (TL.snapLine != null) { const x = Math.round(tX(TL.snapLine)) + 0.5; c.strokeStyle = CS.ui; c.lineWidth = 1.5; c.beginPath(); c.moveTo(x, 6); c.lineTo(x, TL.axisY); c.stroke(); c.lineWidth = 1; }
+  // elements
+  const gs = gScale();
+  for (const e of EL) drawEl(c, e, SEL.has(e.id), 1, gs);
+  if (TL.ghost) drawEl(c, TL.ghost, false, 0.5, gs);
+  // echo markers
+  if (AN) {
+    const er = rowOf('echo'), ar = rowOf('adc');
+    c.font = `600 10px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace`; c.textBaseline = 'middle';
+    const placed = [];
+    for (const e of AN.se.slice().sort((a, b) => b.amp - a.amp)) {
+      const x = tX(e.t), y = er.y + 13, a = Math.min(1, 0.35 + e.amp);
+      c.globalAlpha = a; c.fillStyle = CS.echo;
+      c.beginPath(); c.moveTo(x - 5, y - 5); c.lineTo(x + 5, y - 5); c.lineTo(x, y + 4); c.closePath();
+      if (e.deph) { c.globalAlpha = 0.55; c.strokeStyle = CS.echo; c.lineWidth = 1.2; c.stroke(); c.lineWidth = 1; } else c.fill();
+      if (!placed.some(px => Math.abs(px - x) < 34)) { c.textAlign = 'left'; c.fillText(e.lab, x + 7, y); placed.push(x); }
+      c.globalAlpha = 1;
+    }
+    for (const g of AN.ge) {
+      const x = tX(g.t), y = ar.y + ar.h / 2;
+      c.globalAlpha = Math.min(1, 0.4 + g.amp);
+      c.beginPath(); c.arc(x, y, 4.5, 0, 2 * Math.PI);
+      if (g.fac > 0.3) { c.fillStyle = CS.echo; c.fill(); } else { c.strokeStyle = CS.echo; c.lineWidth = 1.5; c.stroke(); c.lineWidth = 1; }
+      c.globalAlpha = 1;
+    }
+  }
+}
+function drawEl(c, e, sel, alpha, gs) {
+  c.save(); c.globalAlpha = alpha;
+  const x0 = tX(elStart(e)), x1 = tX(elEnd(e));
+  if (e.type === 'rf') {
+    const r = rowOf('rf'), base = r.y + r.h - 9, A = (r.h - 24) * Math.max(0.1, Math.min(1, e.flip / 180)), col = rfColorOf(e);
+    c.beginPath(); c.moveTo(x0, base);
+    for (let i = 0; i <= 80; i++) { const u = i / 80 - 0.5, s = sinc(TBW * u) * (0.54 + 0.46 * Math.cos(2 * Math.PI * u)); c.lineTo(x0 + (x1 - x0) * i / 80, base - A * s); }
+    c.lineTo(x1, base); c.fillStyle = hexA(col, 0.22 * alpha); c.fill(); c.strokeStyle = col; c.lineWidth = 1.5; c.stroke(); c.lineWidth = 1;
+    c.fillStyle = CS.text; c.font = `600 10.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace`; c.textAlign = 'center'; c.textBaseline = 'alphabetic';
+    c.fillText(`${fmt(e.flip)}°`, (x0 + x1) / 2, base - A - 4);
+    if (e.freq) { c.fillStyle = CS.muted; c.font = `400 9.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace`; c.textAlign = 'left'; c.fillText(`${e.freq > 0 ? '+' : ''}${fmt(e.freq)} kHz`, x1 + 3, base - 2); }
+    if (sel) selBox(c, x0, r.y + 3, x1 - x0, r.h - 6);
+  } else if (e.type === 'grad') {
+    const r = rowOf(e.axis), ym = r.y + r.h / 2, k = (r.h / 2 - 6) / gs;
+    const xs = [tX(e.t), tX(e.t + e.ramp), tX(e.t + e.ramp + e.flat), tX(e.t + gTotal(e))], yA = ym - e.amp * k;
+    if (e.table) {
+      c.strokeStyle = hexA(CS.grad, 0.55); c.beginPath();
+      for (let q = -4; q <= 4; q++) { const yy = ym - e.amp * k * q / 4; c.moveTo(xs[1], yy); c.lineTo(xs[2], yy); }
+      c.stroke();
+      c.beginPath(); c.moveTo(xs[0], ym); c.lineTo(xs[1], ym + e.amp * k); c.lineTo(xs[2], ym + e.amp * k); c.lineTo(xs[3], ym); c.strokeStyle = CS.grad; c.stroke();
+      const fl = (P.kLine - P.ny / 2) / (P.ny / 2), yl = ym - e.amp * k * fl; // the line shown in the k-space pane
+      c.strokeStyle = CS.ui; c.lineWidth = 2; c.beginPath(); c.moveTo(xs[0], ym); c.lineTo(xs[1], yl); c.lineTo(xs[2], yl); c.lineTo(xs[3], ym); c.stroke(); c.lineWidth = 1;
+    }
+    c.beginPath(); c.moveTo(xs[0], ym); c.lineTo(xs[1], yA); c.lineTo(xs[2], yA); c.lineTo(xs[3], ym); c.closePath();
+    c.fillStyle = hexA(CS.grad, 0.2 * alpha); c.fill(); c.strokeStyle = CS.grad; c.lineWidth = 1.5; c.stroke(); c.lineWidth = 1;
+    if (xs[3] - xs[0] > 30) {
+      c.fillStyle = CS.muted; c.font = `400 9.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace`; c.textAlign = 'center'; c.textBaseline = e.amp >= 0 ? 'bottom' : 'top';
+      c.fillText(e.table ? `±${fmt(Math.abs(e.amp))} mT/m` : `${fmt(e.amp)} mT/m`, (xs[1] + xs[2]) / 2, e.amp >= 0 ? Math.max(r.y + 11, yA - 2) : Math.min(r.y + r.h - 11, yA + 2));
+    }
+    // areas (mT·ms/m), split at RF centres and nominal echoes; on the other side of the baseline
+    if (alpha === 1) {
+      const segs = gradSegments(e), yt = e.amp >= 0 ? ym + 3 : ym - 3;
+      c.font = `600 9.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace`; c.textBaseline = e.amp >= 0 ? 'top' : 'bottom'; c.textAlign = 'center';
+      segs.forEach((sg, i) => {
+        const xa = tX(sg.a), xb = tX(sg.b), txt = (e.table ? '±' + fmt(Math.abs(sg.area)) : fmt(sg.area));
+        if (i) { c.strokeStyle = CS.text; c.setLineDash([2, 2]); c.beginPath(); c.moveTo(xa + 0.5, ym); c.lineTo(xa + 0.5, yA); c.stroke(); c.setLineDash([]); }
+        if (c.measureText(txt).width + 4 < Math.max(xb - xa, segs.length === 1 ? 60 : 0)) { c.fillStyle = segs.length > 1 ? CS.text : CS.muted; c.fillText(txt, (xa + xb) / 2, yt); }
+      });
+    }
+    if (sel) selBox(c, x0, r.y + 3, x1 - x0, r.h - 6);
+  } else if (e.type === 'adc') {
+    const r = rowOf('adc'), y0 = r.y + 9, hh = r.h - 18;
+    c.fillStyle = hexA(CS.adc, 0.22 * alpha); c.fillRect(x0, y0, x1 - x0, hh); c.strokeStyle = CS.adc; c.lineWidth = 1.5; c.strokeRect(x0 + 0.5, y0 + 0.5, x1 - x0 - 1, hh - 1); c.lineWidth = 1;
+    const n = adcN(e), dx = adcDw() * pxPerMs();
+    if (dx > 2.5) { c.beginPath(); for (let j = 0; j < n; j++) { const x = x0 + (j + 0.5) * dx; c.moveTo(x, y0 + hh - 4); c.lineTo(x, y0 + hh); } c.strokeStyle = CS.adc; c.stroke(); }
+    if (x1 - x0 > 40) { c.fillStyle = CS.muted; c.font = `400 9.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace`; c.textAlign = 'left'; c.textBaseline = 'top'; c.fillText(`${n} × ${fmt(P.dwell)} µs`, x0 + 4, y0 + 2); }
+    const xe = Math.round(tX(echoTime(e))) + 0.5; c.strokeStyle = CS.adc; c.lineWidth = 2; c.beginPath(); c.moveTo(xe, y0 - 4); c.lineTo(xe, y0 + hh + 4); c.stroke(); c.lineWidth = 1;
+    if (sel) selBox(c, x0, r.y + 3, x1 - x0, r.h - 6);
+  }
+  c.restore();
+}
+function selBox(c, x, y, w, h) { c.strokeStyle = CS.ui; c.lineWidth = 1.5; c.setLineDash([4, 3]); c.strokeRect(x - 3, y, w + 6, h); c.setLineDash([]); c.lineWidth = 1; }
+const fmt = v => { if (!isFinite(v)) return '–'; const a = Math.abs(v); return a >= 100 ? v.toFixed(0) : a >= 10 ? (+v.toFixed(1)).toString() : (+v.toFixed(2)).toString(); };
+
+/* ---------- hit testing and dragging ---------- */
+function rowAt(y) { return TL.rows.find(r => y >= r.y && y < r.y + r.h); }
+function hit(x, y) {
+  const r = rowAt(y); if (!r) return null;
+  const E = 6, gs = gScale();
+  const cands = EL.filter(e => (e.type === 'rf' && r.k === 'rf') || (e.type === 'adc' && r.k === 'adc') || (e.type === 'grad' && r.k === e.axis));
+  // prefer the selected one, then the narrowest
+  cands.sort((a, b) => SEL.has(b.id) - SEL.has(a.id) || (elEnd(a) - elStart(a)) - (elEnd(b) - elStart(b)));
+  for (const e of cands) {
+    const x0 = tX(elStart(e)), x1 = tX(elEnd(e));
+    if (x < x0 - E || x > x1 + E) continue;
+    if (e.type === 'grad') {
+      const ym = r.y + r.h / 2, yA = ym - e.amp * (r.h / 2 - 6) / gs, xa = tX(e.t + e.ramp), xb = tX(e.t + e.ramp + e.flat);
+      if (Math.abs(y - yA) <= 5 && x >= xa - 2 && x <= xb + 2 && Math.abs(yA - ym) > 3) return { e, mode: 'amp' };
+      if (Math.abs(x - x1) <= E) return { e, mode: 'R' };
+      if (Math.abs(x - x0) <= E) return { e, mode: 'L' };
+      return { e, mode: 'move' };
+    }
+    if (x1 - x0 > 16) { if (Math.abs(x - x1) <= E) return { e, mode: 'R' }; if (Math.abs(x - x0) <= E) return { e, mode: 'L' }; }
+    return { e, mode: 'move' };
+  }
+  return null;
+}
+let drag = null;
+const CURSOR = { move: 'grab', L: 'ew-resize', R: 'ew-resize', amp: 'ns-resize' };
+tlc.addEventListener('pointerdown', ev => {
+  const x = ev.offsetX, y = ev.offsetY, hh = hit(x, y);
+  const add = ev.ctrlKey || ev.metaKey;
+  if (!hh) { // rubber band over the rails
+    if (x > TL.GL && y < TL.axisY) { tlc.setPointerCapture(ev.pointerId); TL.band = { x0: x, y0: y, x1: x, y1: y, add, base: add ? new Set(SEL) : new Set() }; }
+    else if (!add) select(null);
+    return;
+  }
+  if (add) { // toggle membership; no drag
+    if (SEL.has(hh.e.id)) { SEL.delete(hh.e.id); select(SEL.size ? [...SEL].pop() : null, false, true); }
+    else { SEL.add(hh.e.id); select(hh.e.id, false, true); }
+    return;
+  }
+  tlc.setPointerCapture(ev.pointerId);
+  const group = SEL.has(hh.e.id) && SEL.size > 1 && hh.mode === 'move';
+  select(hh.e.id, false, group);
+  const others = group ? EL.filter(q => SEL.has(q.id) && q !== hh.e).map(q => ({ q, t: q.t })) : [];
+  drag = { e: hh.e, mode: hh.mode, x, y, o: { ...hh.e }, moved: false, gs: gScale(), others };
+  TL.frozen = true;
+});
+tlc.addEventListener('pointermove', ev => {
+  const x = ev.offsetX, y = ev.offsetY;
+  if (TL.band) { TL.band.x1 = x; TL.band.y1 = y; bandSelect(false); return; }
+  if (!drag) { const hh = hit(x, y); tlc.style.cursor = hh ? CURSOR[hh.mode] : 'default'; return; }
+  const dt = (x - drag.x) / pxPerMs(), e = drag.e, o = drag.o;
+  if (!drag.moved && Math.abs(x - drag.x) + Math.abs(y - drag.y) < 3) return;
+  if (!drag.moved) { snapshot(); drag.moved = true; }
+  tlc.style.cursor = drag.mode === 'move' ? 'grabbing' : CURSOR[drag.mode];
+  TL.snapLine = null;
+  if (drag.mode === 'move') {
+    const tm = xT(tX(o.t) + (x - drag.x)); // through the frozen map, so a break is crossed quickly
+    if (e.type === 'rf') e.t = Math.max(e.dur / 2, snapT(tm));
+    else e.t = Math.max(0, snapT(tm));
+    // snap this block's centre to the centre of an RF pulse, gradient or ADC, or to a nominal echo, within 7 px
+    const c0 = centreOf(e), tol = 7 / pxPerMs(); let best = null;
+    for (const q of EL) {
+      if (q === e || SEL.has(q.id)) continue;
+      const cand = [centreOf(q)]; if (q.type === 'adc') cand.push(echoTime(q));
+      for (const tc of cand) if (Math.abs(tc - c0) < tol && (!best || Math.abs(tc - c0) < Math.abs(best - c0))) best = tc;
+    }
+    if (e.type === 'adc') for (const q of EL) if (q !== e && !SEL.has(q.id) && q.type !== 'adc') { // an ADC can also bring its echo onto a centre
+      const tc = centreOf(q), d = tc - echoTime(e); if (Math.abs(d) < tol && (best === null || Math.abs(d) < Math.abs(best - c0))) best = c0 + d;
+    }
+    if (best !== null && e.t + best - c0 >= 0) { e.t += best - c0; TL.snapLine = e.type === 'adc' && Math.abs(echoTime(e) - best) > 1e-9 && Math.abs(centreOf(e) - best) > 1e-9 ? echoTime(e) : best; }
+    if (drag.others.length) { // move the rest of the selection by the same shift, keeping all of it at t ≥ 0
+      let d = e.t - o.t;
+      for (const { q, t } of drag.others) d = Math.max(d, (q.type === 'rf' ? q.dur / 2 : 0) - t);
+      e.t = o.t + d; for (const { q, t } of drag.others) q.t = t + d;
+    }
+    if (e.type === 'grad' && !e.table && !drag.others.length) { const r = rowAt(y); if (r && 'xyz'.includes(r.k) && r.k.length === 1 && r.k !== e.axis) e.axis = r.k; }
+  } else if (drag.mode === 'amp') {
+    const r = rowOf(e.axis), k = (r.h / 2 - 6) / drag.gs;
+    e.amp = Math.round((o.amp - (y - drag.y) / k) * 10) / 10;
+  } else if (e.type === 'grad') {
+    if (drag.mode === 'R') e.flat = Math.max(0, snapT(o.flat + dt));
+    else { const d = Math.min(snapT(dt), o.flat); e.t = Math.max(0, o.t + d); e.flat = Math.max(0, o.flat - (e.t - o.t)); }
+  } else if (e.type === 'rf') {
+    const d = (drag.mode === 'R' ? 2 : -2) * dt; e.dur = Math.max(0.2, Math.min(2 * e.t, snapT(o.dur + d)));
+  } else if (e.type === 'adc') {
+    if (drag.mode === 'R') e.dur = Math.max(0.2, snapT(o.dur + dt));
+    else { const d = Math.min(snapT(dt), o.dur - 0.2); e.t = Math.max(0, o.t + d); e.dur = o.dur - (e.t - o.t); }
+  }
+  changed(false);
+});
+function bandSelect(done) {
+  const B = TL.band, xa = Math.min(B.x0, B.x1), xb = Math.max(B.x0, B.x1), ya = Math.min(B.y0, B.y1), yb = Math.max(B.y0, B.y1);
+  const small = xb - xa < 3 && yb - ya < 3;
+  SEL.clear(); for (const id of B.base) SEL.add(id);
+  if (!small) for (const e of EL) {
+    const r = rowOf(railFor(e)), x0 = tX(elStart(e)), x1 = tX(elEnd(e));
+    if (x1 >= xa && x0 <= xb && r.y + r.h >= ya && r.y <= yb) SEL.add(e.id);
+  }
+  if (done) { TL.band = null; if (small && !B.add) select(null); else select(SEL.size ? [...SEL].pop() : null, false, true); return; }
+  drawTL(); const c = tctx; c.fillStyle = hexA(CS.ui, 0.08); c.fillRect(xa, ya, xb - xa, yb - ya); c.strokeStyle = CS.ui; c.setLineDash([4, 3]); c.strokeRect(xa + 0.5, ya + 0.5, xb - xa, yb - ya); c.setLineDash([]);
+}
+function endDrag() {
+  if (TL.band) { bandSelect(true); return; }
+  if (!drag) return; const moved = drag.moved; drag = null; TL.frozen = null; TL.snapLine = null; tlc.style.cursor = 'default';
+  if (moved) changed(true); else drawTL();
+}
+tlc.addEventListener('pointerup', endDrag); tlc.addEventListener('pointercancel', endDrag);
+tlc.addEventListener('dblclick', ev => { const hh = hit(ev.offsetX, ev.offsetY); if (hh) { select(hh.e.id); const f = document.querySelector('#insp input'); if (f) f.focus(); } });
+
+/* ---------- palette: drag a new block onto a rail, or click to append ---------- */
+const TEMPL = {
+  rf90: () => ({ type: 'rf', flip: 90, dur: 2, freq: 0, phase: 0 }),
+  rf180: () => ({ type: 'rf', flip: 180, dur: 2, freq: 0, phase: 0 }),
+  grad: () => { const s0 = EL.find(q => q.id === selId); return { type: 'grad', axis: s0 && s0.type === 'grad' ? s0.axis : 'z', amp: 10, flat: 1, ramp: RAMP, table: false }; },
+  gpe: () => { const o = EL.find(q => q.table); return { type: 'grad', axis: 'y', amp: o ? o.amp : r2(areaAmp(PE_AREA())), flat: 0.6, ramp: RAMP, table: true }; },
+  adc: () => ({ type: 'adc', dur: ADC_DUR })
+};
+const railFor = e => e.type === 'rf' ? 'rf' : e.type === 'adc' ? 'adc' : e.axis;
+function placeAt(e, t) { // centre the block on t
+  const len = e.type === 'rf' ? e.dur : e.type === 'adc' ? e.dur : gTotal(e);
+  e.t = e.type === 'rf' ? Math.max(e.dur / 2, snapT(t)) : Math.max(0, snapT(t - len / 2));
+}
+let pdrag = null;
+const ghost = $('ghost');
+document.querySelectorAll('#palette .chip').forEach(btn => {
+  btn.addEventListener('pointerdown', ev => {
+    ev.preventDefault();
+    pdrag = { kind: btn.dataset.new, x: ev.clientX, y: ev.clientY, moved: false, label: btn.textContent.trim() };
+    btn.setPointerCapture(ev.pointerId);
+  });
+  btn.addEventListener('pointermove', ev => {
+    if (!pdrag) return;
+    if (!pdrag.moved && Math.hypot(ev.clientX - pdrag.x, ev.clientY - pdrag.y) < 4) return;
+    pdrag.moved = true;
+    ghost.hidden = false; ghost.textContent = pdrag.label; ghost.style.left = (ev.clientX + 10) + 'px'; ghost.style.top = (ev.clientY + 8) + 'px';
+    const r = tlc.getBoundingClientRect(), x = ev.clientX - r.left, y = ev.clientY - r.top;
+    TL.ghost = null;
+    if (x > TL.GL && x < r.width && y >= 0 && y < TL.axisY) {
+      const row = rowAt(y), e = TEMPL[pdrag.kind]();
+      if (row && e.type === 'grad' && !e.table && 'xyz'.includes(row.k) && row.k.length === 1) e.axis = row.k;
+      if (row && railFor(e) === row.k) { placeAt(e, xT(x)); TL.ghost = e; }
+    }
+    drawTL();
+  });
+  const finish = ev => {
+    if (!pdrag) return;
+    const kind = pdrag.kind, moved = pdrag.moved; pdrag = null; ghost.hidden = true;
+    if (!moved) { addBlock(TEMPL[kind]()); return; }
+    if (TL.ghost) { const e = TL.ghost; TL.ghost = null; snapshot(); e.id = nextId++; EL.push(e); select(e.id, true); changed(true); }
+    else drawTL();
+  };
+  btn.addEventListener('pointerup', finish); btn.addEventListener('pointercancel', () => { pdrag = null; ghost.hidden = true; TL.ghost = null; drawTL(); });
+  btn.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); addBlock(TEMPL[btn.dataset.new]()); } });
+});
+function addBlock(e) { // after the last block on its rail
+  const rail = railFor(e); let t = 0.5;
+  for (const o of EL) if (railFor(o) === rail) t = Math.max(t, elEnd(o) + 0.5);
+  if (e.type === 'rf') e.t = snapT(t + e.dur / 2); else e.t = snapT(t);
+  snapshot(); e.id = nextId++; EL.push(e); select(e.id, true); changed(true);
+}
+function deleteSel() { if (!SEL.size) return; snapshot(); EL = EL.filter(e => !SEL.has(e.id)); SEL.clear(); select(null); changed(true); }
+$('delBtn').addEventListener('click', deleteSel);
+$('undoBtn').addEventListener('click', undo);
+document.addEventListener('keydown', ev => {
+  if (ev.target.closest('input,select,textarea') || !$('about').hidden) return;
+  if ((ev.key === 'Delete' || ev.key === 'Backspace') && SEL.size) { ev.preventDefault(); deleteSel(); }
+  else if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z') { ev.preventDefault(); undo(); }
+  else if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'a') { ev.preventDefault(); SEL.clear(); for (const e of EL) SEL.add(e.id); select(EL.length ? EL[EL.length - 1].id : null, false, true); }
+  else if ((ev.key === 'ArrowLeft' || ev.key === 'ArrowRight') && SEL.size) {
+    ev.preventDefault(); snapshot();
+    const G = EL.filter(q => SEL.has(q.id)); let d = (ev.key === 'ArrowLeft' ? -1 : 1) * (ev.shiftKey ? 1 : 0.1);
+    for (const q of G) d = Math.max(d, (q.type === 'rf' ? q.dur / 2 : 0) - q.t);
+    for (const q of G) q.t = Math.round((q.t + d) * 1e6) / 1e6;
+    changed(true);
+  } else if (ev.key === 'Escape') select(null);
+});
+
+/* ==================== INSPECTOR ==================== */
+function select(id, quiet, keep) {
+  if (!keep) { SEL.clear(); if (id != null) SEL.add(id); }
+  selId = id; $('delBtn').disabled = !SEL.size;
+  buildInspector(); if (!quiet) drawTL();
+}
+const FIELDS = {
+  rf: [['flip', 'Flip angle', 0, 180, 1, '°'], ['freq', 'Frequency offset', -50, 50, 0.01, 'kHz'], ['phase', 'Phase', 0, 360, 1, '°'], ['dur', 'Duration', 0.4, 8, 0.05, 'ms'], ['t', 'Centre time', 0, 5000, 0.05, 'ms']],
+  grad: [['amp', 'Amplitude', -40, 40, 0.1, 'mT/m'], ['flat', 'Flat top', 0, 20, 0.05, 'ms'], ['ramp', 'Ramp', 0.05, 1, 0.05, 'ms'], ['t', 'Start time', 0, 5000, 0.05, 'ms']],
+  adc: [['dur', 'Duration', 0.4, 12, 0.05, 'ms'], ['t', 'Start time', 0, 5000, 0.05, 'ms']]
+};
+function buildInspector() {
+  const box = $('insp'), e = EL.find(q => q.id === selId);
+  if (SEL.size > 1) {
+    const G = EL.filter(q => SEL.has(q.id)), a = Math.min(...G.map(elStart)), b = Math.max(...G.map(elEnd));
+    const name = q => q.type === 'rf' ? `RF ${fmt(q.flip)}°` : q.type === 'adc' ? 'ADC' : `G${q.axis}${q.table ? ' table' : ''} ${fmt(q.amp)} mT/m`;
+    box.innerHTML = `<p class="note" style="margin-bottom:8px"><b>${G.length} blocks selected</b>, ${fmt(a)}–${fmt(b)} ms. Drag any of them to move all in time; arrow keys nudge them (Shift: 1 ms). Ctrl/Cmd-click adds or removes a block; Ctrl/Cmd-A selects all.</p>` +
+      `<table class="read">${G.sort((p, q) => elStart(p) - elStart(q)).map(q => `<tr><td>${name(q)}</td><td>${fmt(elStart(q))} ms</td></tr>`).join('')}</table>`;
+    return;
+  }
+  if (!e) { box.innerHTML = '<p class="note">Nothing selected. Click a block in the sequence. Ctrl/Cmd-click or drag a box on empty rail space selects several; Ctrl/Cmd-A selects all.</p>'; return; }
+  let h = '';
+  if (e.type === 'rf') h += `<p class="note" style="margin-bottom:9px"><span class="sw" style="background:${rfColorOf(e)}"></span><b>RF pulse</b> · sinc, time–bandwidth ${TBW}</p>`;
+  if (e.type === 'grad') h += `<div class="sel"><label for="iAxis">Gradient axis</label><select id="iAxis"><option value="z">Gz (slice)</option><option value="y">Gy (phase)</option><option value="x">Gx (read)</option></select></div>`;
+  if (e.type === 'adc') h += `<p class="note" style="margin-bottom:9px"><span class="sw" style="background:var(--adc)"></span><b>ADC</b> · samples every ${fmt(P.dwell)} µs (dwell time under Encoding)</p>`;
+  for (const [k, lab, mn, mx, st, u] of FIELDS[e.type]) {
+    h += `<div class="ctl"><div class="lab"><span>${lab}${u ? ` (${u})` : ''}</span><input type="number" data-k="${k}" min="${mn}" max="${mx}" step="${st}"></div>`;
+    if (k !== 't') h += `<input type="range" data-k="${k}" min="${mn}" max="${mx}" step="${st}" aria-label="${lab}">`;
+    h += `</div>`;
+  }
+  if (e.type === 'grad') h += `<div class="row" id="tblRow"><label class="chk"><input type="checkbox" id="iTable">Phase-encoding table (one step per line)</label></div>`;
+  h += `<table class="read" id="iRead"></table>`;
+  if (e.type === 'adc') h += `<div class="row" style="margin-top:8px"><button class="sm" id="iFitRead" type="button" title="Set the Gx gradient under this ADC so the readout covers a 240 mm FOV">Set Gx for FOV 240 mm</button></div>`;
+  if (e.type === 'grad' && e.table) h += `<div class="row" style="margin-top:8px"><button class="sm" id="iFitPE" type="button" title="Set the amplitude so the step between lines gives a 240 mm FOV">Set for FOV 240 mm</button></div>`;
+  box.innerHTML = h;
+  box.querySelectorAll('[data-k]').forEach(inp => {
+    inp.addEventListener('focus', () => { inp._snap = false; });
+    inp.addEventListener('input', () => {
+      const v = parseFloat(inp.value); if (!isFinite(v)) return;
+      if (!inp._snap) { snapshot(); inp._snap = true; }
+      e[inp.dataset.k] = v;
+      if (e.type === 'rf' && e.t < e.dur / 2) e.t = e.dur / 2;
+      syncInspector(inp); changed(false); scheduleImage();
+    });
+    inp.addEventListener('change', () => { inp._snap = false; changed(true); });
+  });
+  if (e.type === 'grad') {
+    const ax = $('iAxis'); ax.value = e.axis;
+    ax.addEventListener('change', () => { snapshot(); e.axis = ax.value; if (e.axis !== 'y') e.table = false; buildInspector(); changed(true); });
+    const tb = $('iTable'); tb.checked = !!e.table; $('tblRow').hidden = e.axis !== 'y';
+    tb.addEventListener('change', () => { snapshot(); e.table = tb.checked; buildInspector(); changed(true); });
+  }
+  if ($('iFitRead')) $('iFitRead').addEventListener('click', () => {
+    const tc = e.t + e.dur / 2, g = EL.find(q => q.type === 'grad' && q.axis === 'x' && !q.table && q.t + q.ramp <= tc && q.t + q.ramp + q.flat >= tc);
+    if (!g) { alert('No Gx gradient with its flat top under the middle of this ADC.'); return; }
+    snapshot(); g.amp = r2(readG(adcDw())); changed(true);
+  });
+  if ($('iFitPE')) $('iFitPE').addEventListener('click', () => { snapshot(); e.amp = r2(PE_AREA() / (e.flat + e.ramp)) * Math.sign(e.amp || 1); syncGlobal(); changed(true); });
+  syncInspector();
+}
+function syncInspector(skip) {
+  const e = EL.find(q => q.id === selId), box = $('insp'); if (!e || SEL.size > 1) { if (SEL.size > 1) buildInspector(); return; }
+  box.querySelectorAll('[data-k]').forEach(inp => { if (inp !== skip) inp.value = +(+e[inp.dataset.k]).toFixed(3); });
+  const rd = $('iRead'); if (!rd) return;
+  const rows = [];
+  if (e.type === 'rf' && MODEL) {
+    const p = MODEL.PU.find(q => q.e === e); if (!p) return;
+    rows.push(['Bandwidth', `${fmt(p.bw / 1e3)} kHz`]);
+    if (!p.sel) rows.push(['Slice', 'non-selective (no gradient at the centre)']);
+    else {
+      const ax = Math.abs(p.n[0]) > 0.999 ? 'x' : Math.abs(p.n[1]) > 0.999 ? 'y' : Math.abs(p.n[2]) > 0.999 ? 'z' : null;
+      rows.push(['Slice gradient', `${fmt(p.Gm)} mT/m${ax ? ' along ' + ax : ''}`]);
+      rows.push(['Thickness', `${fmt(p.thick)} mm`]);
+      rows.push(['Position', `${p.s0 >= 0 ? '+' : ''}${fmt(p.s0)} mm${ax ? ' in ' + ax : ' along the normal'}`]);
+    }
+    // area of the gradients from this pulse's centre to their end: what a rewinder must cancel (for an excitation)
+    for (const g of EL) if (g.type === 'grad' && !g.table && g.t < e.t && g.t + gTotal(g) > e.t) {
+      const after = g.amp * (g.flat + g.ramp) - gCum(g, e.t), before = gCum(g, e.t);
+      rows.push([`G${g.axis} area before / after centre`, `${fmt(before)} / ${fmt(after)} mT·ms/m`]);
+    }
+  } else if (e.type === 'grad') {
+    const area = e.amp * (e.flat + e.ramp);
+    rows.push(['Area', `${e.table ? '±' : ''}${fmt(e.table ? Math.abs(area) : area)} mT·ms/m`]);
+    const segs = gradSegments(e);
+    if (segs.length > 1) for (const sg of segs) rows.push([`&nbsp;&nbsp;${sg.from.lab} → ${sg.to.lab}`, `${fmt(sg.area)} mT·ms/m`]);
+    rows.push([e.table ? 'k, table extremes' : 'k = γ̄·area', `${e.table ? '±' : ''}${fmt(Math.abs(area) * KF)} 1/m`]);
+    if (e.table) {
+      const dky = Math.abs(area) * KF / (P.ny / 2);
+      rows.push(['Steps (lines)', `${P.ny}, Δk = ${fmt(dky)} 1/m`]);
+      rows.push(['FOV along y', dky > 1e-6 ? `${fmt(1e3 / dky)} mm` : '–']);
+      rows.push(['Voxel along y', dky > 1e-6 ? `${fmt(1e3 / dky / P.ny)} mm` : '–']);
+    }
+  } else if (e.type === 'adc') {
+    const dw = adcDw(), n = adcN(e), te = echoTime(e);
+    let G = 0; for (const g of EL) if (g.type === 'grad' && g.axis === 'x' && !g.table) G += gVal(g, te);
+    rows.push(['Samples × dwell', `${n} × ${fmt(dw * 1e3)} µs`]);
+    rows.push(['Bandwidth / pixel', `${fmt(1 / (n * dw * 1e-3))} Hz`]);
+    rows.push(['Gx at the echo', `${fmt(G)} mT/m`]);
+    const dkx = KF * Math.abs(G) * dw;
+    rows.push(['FOV along x', dkx > 1e-6 ? `${fmt(1e3 / dkx)} mm` : '– (no read gradient)']);
+    rows.push(['Voxel along x', dkx > 1e-6 ? `${fmt(1e3 / dkx / n)} mm` : '–']);
+    rows.push([`Nominal echo (sample ${Math.floor(n / 2) + 1})`, `${fmt(te)} ms`]);
+    // read gradient area from its start to the echo: what the prephaser must cancel
+    for (const g of EL) if (g.type === 'grad' && g.axis === 'x' && !g.table && g.t < te && g.t + gTotal(g) > te)
+      rows.push(['Gx area start → echo', `${fmt(gCum(g, te))} mT·ms/m`]);
+  }
+  rd.innerHTML = rows.map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('');
+}
+
+/* ==================== RAIL READOUTS ==================== */
+function updateEchoList() {
+  const L = $('echoList'), M = MODEL, items = [];
+  for (const e of AN.se.slice().sort((a, b) => a.t - b.t)) items.push(`<li${e.deph ? ' style="opacity:.6"' : ''}><b>${e.lab}</b> at ${fmt(e.t)} ms <span style="color:var(--dim)">(TE ${fmt(e.TE)} ms, ${fmt(100 * e.amp)} %${e.deph ? ', dephased by gradients' : ''})</span></li>`);
+  for (const g of AN.ge.filter(g => g.amp * g.fac > 0.02).sort((a, b) => b.amp * b.fac - a.amp * a.fac).slice(0, 6)) {
+    const extra = Math.abs(g.tau) < 0.05 ? 'τ = 0' : `τ = ${fmt(g.tau)} ms`;
+    items.push(`<li><b>k = 0</b> in ADC ${g.ai + 1} at ${fmt(g.t)} ms <span style="color:var(--dim)">(${g.lab}, TE ${fmt(g.TE)} ms, ${extra}${g.fac < 0.95 ? `, slab signal ×${fmt(g.fac)}` : ''})</span></li>`);
+  }
+  L.innerHTML = items.length ? items.join('') : '<li>No echoes yet.</li>';
+  const W = [];
+  if (!M.PU.length) W.push('No RF pulse.');
+  if (M.PU.length && !M.adcs.length) W.push('No ADC: nothing is acquired.');
+  if (M.lastEnd > P.TR) W.push(`The sequence (${fmt(M.lastEnd)} ms) is longer than TR; TR is taken as ${fmt(M.TRe)} ms.`);
+  if (M.adcs.length && !AN.ge.length) W.push('No pathway crosses k = 0 during a readout: check the read prephaser, rewinders and refocusing.');
+  else if (AN.ge.length && AN.ge.every(g => g.fac < 0.3)) W.push('The echo is dephased through the slab (k_z ≠ 0): a slice rewinder is missing or wrong.');
+  if (!EL.some(e => e.type === 'grad' && e.table) && M.adcs.length) W.push('No phase-encoding table: every line is the same, so the whole projection along y collapses into the middle row of the image.');
+  $('seqWarn').textContent = W.join(' ');
+  // 3D legend
+  $('legend3').innerHTML = M.PU.map(p => `<div><span class="sw" style="background:${pcol(p.col)}"></span>${fmt(p.e.flip)}° · ${p.sel ? `${fmt(p.thick)} mm at ${p.s0 >= 0 ? '+' : ''}${fmt(p.s0)} mm` : 'non-selective'}</div>`).join('') +
+    (ENC ? `<div style="color:var(--dim)">image ${ENC.Nx} × ${ENC.Ny} · FOV ${ENC.noRead ? '–' : fmt(ENC.fovX)} × ${ENC.noPE ? '–' : fmt(ENC.fovY)} mm</div>` : '');
+  // ADC selector
+  const s = $('adcSel'); s.hidden = M.adcs.length < 2;
+  if (M.adcs.length >= 2) { s.innerHTML = M.adcs.map((a, i) => `<option value="${i}">ADC ${i + 1}</option>`).join(''); s.value = Math.min(P.adcSel, M.adcs.length - 1); }
+}
+
+/* ==================== 3D VIEW ==================== */
+const c3 = $('c3'), x3 = c3.getContext('2d');
+const V3_SIG = { fat: 0.0028, wm: 0.0022, gm: 0.012, csf: 0.02, lesion: 0.05, blood: 0.05, muscle: 0.0075, liver: 0.008, kidney: 0.012, fluid: 0.012, marrow: 0.012 };
+const V3_COL = { fat: [205, 208, 215], wm: [175, 180, 190], gm: [160, 160, 170], csf: [90, 150, 255], lesion: [255, 90, 90], blood: [200, 40, 60], muscle: [225, 170, 145], liver: [170, 90, 70], kidney: [190, 110, 200], fluid: [90, 160, 255], marrow: [255, 170, 80] };
+const V3_DEF = { yaw: -0.65, pitch: 0.38, zoom: 1 };
+let v3 = { ...V3_DEF }, v3drag = null, v3Off = null, v3Pending = false;
+const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross3 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const norm3 = v => { const L = Math.hypot(...v) || 1; return v.map(x => x / L); };
+function hexRGB(c) { let h = (c || '#888').replace('#', ''); if (h.length === 3) h = h.split('').map(x => x + x).join(''); return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)]; }
+/* encoded FOV and matrix of the chosen ADC, for the 3D view and the Encoding readout */
+let ENC = null;
+function encodingInfo() {
+  const M = MODEL; if (!M || !M.adcs.length) return (ENC = null);
+  const ro = M.RO[Math.min(P.adcSel, M.adcs.length - 1)];
+  return (ENC = { Nx: ro.n, Ny: M.Ny, fovX: 1e3 / ro.gx, fovY: 1e3 / ro.gy, dkx: ro.dkx, noRead: ro.noRead, noPE: ro.noPE, kx: ro.n / 2 * ro.gx, ky: M.Ny / 2 * ro.gy, bw: 1 / (ro.n * ro.dw * 1e-3) });
+}
+function request3D(low) { if (!v3Pending) { v3Pending = true; requestAnimationFrame(() => { v3Pending = false; draw3D(low); }); } }
+/* Orthographic ray casting through the analytic ellipsoids (emission–absorption). Each selective pulse's slab
+   is a translucent box at its true depth, in the pulse's colour, with its edges drawn on top. */
+function draw3D(low) {
+  const W3 = c3.clientWidth, H3 = c3.clientHeight; if (!W3 || !H3 || !MODEL) return;
+  const d = devicePixelRatio || 1;
+  if (c3.width !== Math.round(W3 * d) || c3.height !== Math.round(H3 * d)) { c3.width = Math.round(W3 * d); c3.height = Math.round(H3 * d); }
+  x3.setTransform(d, 0, 0, d, 0, 0);
+  const PH = phantom(P.phantom), VC = PH.view;
+  const cy = Math.cos(v3.yaw), sy = Math.sin(v3.yaw), cp = Math.cos(v3.pitch), sp = Math.sin(v3.pitch);
+  const right = [cy, sy, 0], up = [-sy * sp, cy * sp, cp], fwd = [sy * cp, -cy * cp, sp];
+  const sc = Math.min(W3, H3) * 0.45 / PH.ext * v3.zoom;
+  const rel = c => [c[0] - VC[0], c[1] - VC[1], c[2] - VC[2]];
+  const objs = [];
+  for (const r of PH.R) {
+    const Q = r.Q, c = rel(r.c), Qv = v => [0, 1, 2].map(i => Q[i][0] * v[0] + Q[i][1] * v[1] + Q[i][2] * v[2]);
+    const Qf = Qv(fwd), Qr = Qv(right), Qu = Qv(up), Qc = Qv(c);
+    objs.push({ A: dot3(fwd, Qf), Ba: dot3(Qf, right), Bb: dot3(Qf, up), B0: -dot3(Qf, c),
+      Caa: dot3(right, Qr), Cab: 2 * dot3(right, Qu), Cbb: dot3(up, Qu), Ca: -2 * dot3(right, Qc), Cb: -2 * dot3(up, Qc), C0: dot3(c, Qc) - 1,
+      Q, c, sig: r.vis ?? V3_SIG[r.tissue] ?? 0.006, col: V3_COL[r.tissue] || [200, 200, 200], rim: r.parent < 0 ? 0.19 : 0.28 });
+  }
+  // slabs of the selective pulses, as boxes: thickness along the slice normal, a square of side 2·fx across it
+  const fx = PH.ext * 0.75, boxes = [];
+  for (const p of MODEL.PU) {
+    if (!p.sel || !p.alpha) continue;
+    const n = p.n, a = Math.abs(n[2]) < 0.9 ? [0, 0, 1] : [0, 1, 0], e1 = norm3(cross3(a, n)), e2 = cross3(n, e1);
+    const c = rel(n.map(v => v * p.s0)), U = [n, e1, e2], axial = Math.abs(n[2]) > 0.999 && ENC;
+    const Hh = [Math.max(0.25, p.thick / 2), axial ? Math.min(600, ENC.fovX / 2) : fx, axial ? Math.min(600, ENC.fovY / 2) : fx];
+    boxes.push({ c, U, Hh, axial, exc: p === MODEL.PU.find(q => q.alpha), col: hexRGB(pcol(p.col)),
+      ax: U.map((u, q) => ({ f: dot3(fwd, u), pa: dot3(right, u), pb: dot3(up, u), co: dot3(c, u), h: Hh[q] })) });
+  }
+  const scale = low ? 0.5 : 1, RW = Math.max(40, Math.round(W3 * scale)), RH = Math.max(30, Math.round(H3 * scale)), pxmm = 1 / (sc * scale);
+  if (!v3Off || v3Off.width !== RW || v3Off.height !== RH) { v3Off = document.createElement('canvas'); v3Off.width = RW; v3Off.height = RH; }
+  const oc = v3Off.getContext('2d'), id = oc.createImageData(RW, RH), D = id.data;
+  const NOb = objs.length, NB = boxes.length, NA = NOb + NB, MAXE = 2 * NA + 2;
+  const zs = new Float64Array(MAXE), kinds = new Int32Array(MAXE), ord = new Int32Array(MAXE), act = new Uint8Array(NA);
+  // ellipsoids glow with their tissue; boxes absorb weakly in the pulse colour and add a face where the ray crosses them
+  const oSig = [...objs.map(o => o.sig), ...boxes.map(() => 0.006)];
+  const oR = [...objs.map(o => o.col[0]), ...boxes.map(b => b.col[0])], oG = [...objs.map(o => o.col[1]), ...boxes.map(b => b.col[1])], oB = [...objs.map(o => o.col[2]), ...boxes.map(b => b.col[2])];
+  const oRim = objs.map(o => o.rim);
+  for (let j = 0; j < RH; j++) {
+    const bb = (RH / 2 - (j + 0.5)) * pxmm;
+    for (let i = 0; i < RW; i++) {
+      const aa = ((i + 0.5) - RW / 2) * pxmm;
+      let ne = 0;
+      for (let k = 0; k < NOb; k++) {
+        const o = objs[k], B = aa * o.Ba + bb * o.Bb + o.B0, Cc = aa * aa * o.Caa + aa * bb * o.Cab + bb * bb * o.Cbb + aa * o.Ca + bb * o.Cb + o.C0;
+        const disc = B * B - o.A * Cc; if (disc <= 0) continue;
+        const sq = Math.sqrt(disc); zs[ne] = (-B + sq) / o.A; kinds[ne++] = 2 * k; zs[ne] = (-B - sq) / o.A; kinds[ne++] = 2 * k + 1;
+      }
+      for (let q = 0; q < NB; q++) { // ray–box (slab method); near = larger z
+        let zn = Infinity, zf = -Infinity, hitB = true;
+        for (const A of boxes[q].ax) {
+          const p0 = aa * A.pa + bb * A.pb;
+          if (Math.abs(A.f) < 1e-9) { if (Math.abs(p0 - A.co) > A.h) { hitB = false; break; } continue; }
+          let z1 = (A.co - A.h - p0) / A.f, z2 = (A.co + A.h - p0) / A.f; if (z1 > z2) { const t = z1; z1 = z2; z2 = t; }
+          if (z2 < zn) zn = z2; if (z1 > zf) zf = z1;
+        }
+        if (!hitB || zn <= zf || !isFinite(zn)) continue;
+        const k = NOb + q; zs[ne] = zn; kinds[ne++] = 2 * k; zs[ne] = zf; kinds[ne++] = 2 * k + 1;
+      }
+      for (let e = 0; e < ne; e++) { let k = e; while (k > 0 && zs[ord[k - 1]] < zs[e]) { ord[k] = ord[k - 1]; k--; } ord[k] = e; }
+      let T = 1, r = 0, g = 0, bl = 0, zPrev = 0;
+      for (let k = 0; k < NA; k++) act[k] = 0;
+      for (let m = 0; m < ne; m++) {
+        const e = ord[m], z = zs[e];
+        if (m > 0) {
+          let sig = 0, cr = 0, cg = 0, cb = 0;
+          for (let k = 0; k < NA; k++) if (act[k]) { const s = oSig[k]; sig += s; cr += s * oR[k]; cg += s * oG[k]; cb += s * oB[k]; }
+          if (sig > 0) { const al = 1 - Math.exp(-sig * (zPrev - z)), w = T * al / sig; r += w * cr; g += w * cg; bl += w * cb; T *= 1 - al; }
+        }
+        zPrev = z;
+        const kd = kinds[e], k = kd >> 1, enter = (kd & 1) === 0;
+        if (k >= NOb) { // box face
+          act[k] = enter ? 1 : 0;
+          const al = enter ? 0.2 : 0.12;
+          r += T * al * oR[k]; g += T * al * oG[k]; bl += T * al * oB[k]; T *= 1 - al;
+        } else if (enter) {
+          act[k] = 1;
+          const o = objs[k], w0 = aa * right[0] + bb * up[0] + z * fwd[0] - o.c[0], w1 = aa * right[1] + bb * up[1] + z * fwd[1] - o.c[1], w2 = aa * right[2] + bb * up[2] + z * fwd[2] - o.c[2], Q = o.Q;
+          const nx = Q[0][0] * w0 + Q[0][1] * w1 + Q[0][2] * w2, ny = Q[1][0] * w0 + Q[1][1] * w1 + Q[1][2] * w2, nz = Q[2][0] * w0 + Q[2][1] * w1 + Q[2][2] * w2;
+          const nl = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1, gz = 1 - Math.abs(nx * fwd[0] + ny * fwd[1] + nz * fwd[2]) / nl, al = oRim[k] * gz * gz * gz;
+          r += T * al * oR[k]; g += T * al * oG[k]; bl += T * al * oB[k]; T *= 1 - al;
+        } else act[k] = 0;
+        if (T < 0.01) break;
+      }
+      const q = (j * RW + i) * 4;
+      D[q] = r + T * 13; D[q + 1] = g + T * 16; D[q + 2] = bl + T * 20; D[q + 3] = 255;
+    }
+  }
+  oc.putImageData(id, 0, 0);
+  x3.imageSmoothingEnabled = true; x3.drawImage(v3Off, 0, 0, W3, H3);
+  // box edges on top, then the orientation triad
+  const P2 = p => [W3 / 2 + sc * dot3(p, right), H3 / 2 - sc * dot3(p, up)];
+  for (const B of boxes) {
+    const corner = (a, b, c) => P2([0, 1, 2].map(i => B.c[i] + a * B.Hh[0] * B.U[0][i] + b * B.Hh[1] * B.U[1][i] + c * B.Hh[2] * B.U[2][i]));
+    x3.beginPath();
+    for (const [a, b] of [[-1, -1], [-1, 1], [1, -1], [1, 1]]) {
+      let p = corner(-1, a, b), q2 = corner(1, a, b); x3.moveTo(p[0], p[1]); x3.lineTo(q2[0], q2[1]);   // along the normal
+      p = corner(a, -1, b); q2 = corner(a, 1, b); x3.moveTo(p[0], p[1]); x3.lineTo(q2[0], q2[1]);
+      p = corner(a, b, -1); q2 = corner(a, b, 1); x3.moveTo(p[0], p[1]); x3.lineTo(q2[0], q2[1]);
+    }
+    x3.strokeStyle = `rgba(${B.col.join(',')},0.9)`; x3.lineWidth = 1.2; x3.stroke();
+    if (B.exc && B.axial) { // voxel grid of the image on the excitation slab (every k-th line when dense)
+      const g = (a, b) => P2([0, 1, 2].map(i => B.c[i] + a * B.U[1][i] + b * B.U[2][i]));
+      const dx = 2 * B.Hh[1] / ENC.Nx, dy = 2 * B.Hh[2] / ENC.Ny, kx = Math.max(1, Math.ceil(4 / (dx * sc))), ky = Math.max(1, Math.ceil(4 / (dy * sc)));
+      x3.beginPath();
+      for (let i = 0; i <= ENC.Nx; i += kx) { const a = -B.Hh[1] + i * dx, p = g(a, -B.Hh[2]), q2 = g(a, B.Hh[2]); x3.moveTo(p[0], p[1]); x3.lineTo(q2[0], q2[1]); }
+      for (let i = 0; i <= ENC.Ny; i += ky) { const b = -B.Hh[2] + i * dy, p = g(-B.Hh[1], b), q2 = g(B.Hh[1], b); x3.moveTo(p[0], p[1]); x3.lineTo(q2[0], q2[1]); }
+      x3.strokeStyle = `rgba(${B.col.join(',')},0.35)`; x3.lineWidth = 0.8; x3.stroke();
+    }
+  }
+  const tx = 34, ty = H3 - 34, L = 22; x3.font = `600 11px ui-monospace,Menlo,Consolas,monospace`; x3.textAlign = 'center'; x3.textBaseline = 'middle';
+  for (const [v, lab, col] of [[[1, 0, 0], 'x', '#ff7a7a'], [[0, 1, 0], 'y', '#7ddc7d'], [[0, 0, 1], 'z', '#7fb0ff']]) {
+    const px = dot3(v, right), py = dot3(v, up); x3.strokeStyle = col; x3.lineWidth = 2;
+    x3.beginPath(); x3.moveTo(tx, ty); x3.lineTo(tx + px * L, ty - py * L); x3.stroke(); x3.fillStyle = col; x3.fillText(lab, tx + px * (L + 9), ty - py * (L + 9));
+  }
+  x3.lineWidth = 1;
+}
+c3.addEventListener('pointerdown', e => { c3.setPointerCapture(e.pointerId); c3.classList.add('drag'); v3drag = { x: e.clientX, y: e.clientY, yaw: v3.yaw, pitch: v3.pitch }; });
+c3.addEventListener('pointermove', e => { if (!v3drag) return; v3.yaw = v3drag.yaw - (e.clientX - v3drag.x) * 0.01; v3.pitch = Math.max(-1.5, Math.min(1.5, v3drag.pitch + (e.clientY - v3drag.y) * 0.01)); request3D(true); });
+const v3up = () => { if (!v3drag) return; v3drag = null; c3.classList.remove('drag'); request3D(false); };
+c3.addEventListener('pointerup', v3up); c3.addEventListener('pointercancel', v3up);
+c3.addEventListener('dblclick', () => { v3 = { ...V3_DEF }; request3D(false); });
+c3.addEventListener('wheel', e => { e.preventDefault(); v3.zoom = Math.max(0.4, Math.min(4, v3.zoom * Math.exp(-e.deltaY * 0.0015))); request3D(true); clearTimeout(c3._t); c3._t = setTimeout(() => request3D(false), 180); }, { passive: false });
+$('reset3d').addEventListener('click', () => { v3 = { ...V3_DEF }; request3D(false); });
+
+/* ==================== K-SPACE VIEW ====================
+   The effective k of one coherence pathway, k = s·k_stored for a transverse state s = ±1: it moves with the
+   gradients, jumps to −k at a pulse that swaps + and −, and is held (not drawn) while stored along z. Shown in
+   the kx–ky plane for the chosen phase-encoding line, with the ADC samples of every line and the region the
+   64 × 64 reconstruction expects (±32 Δk, with k = 0 in the middle). */
+const cK = $('cK'), xK = cK.getContext('2d');
+function replayK(M, h, f, tEnd) {
+  let s = 0; const raw = [0, 0, 0], segs = []; let cur = null;
+  for (const v of M.ev) {
+    const t0 = v.t0, t1 = Math.min(v.t, tEnd);
+    if (t1 > t0 && s !== 0) {
+      if (!cur) { cur = { s, pts: [] }; segs.push(cur); }
+      const n = Math.max(2, Math.ceil((t1 - t0) / 0.02));
+      for (let i = 0; i <= n; i++) {
+        const t = t0 + (t1 - t0) * i / n, m = moment(M.grads, t0, t);
+        cur.pts.push([0, 1, 2].map(a => s * (raw[a] + s * (m.mf[a] + f * m.mt[a]))));
+      }
+    }
+    if (t1 > t0 && s !== 0) { const m = moment(M.grads, t0, t1); for (let a = 0; a < 3; a++) raw[a] += s * (m.mf[a] + f * m.mt[a]); }
+    if (v.t >= tEnd) break;
+    if (v.k === 0) {
+      const ch = h[v.i], ns = ch === '+' ? 1 : ch === '-' ? -1 : ch === 'z' ? 0 : s;
+      if (ns !== s) { cur = null; s = ns; if (s) segs.push({ jump: true, i: v.i }); }
+    }
+  }
+  return segs;
+}
+function updateKTools() {
+  const sel = $('kPath'), kp = AN ? AN.kp : [];
+  if (P.kPath >= kp.length) P.kPath = 0;
+  sel.innerHTML = kp.length ? kp.map((p, i) => `<option value="${i}">${p.lab} · ${fmt(100 * p.amp)} %</option>`).join('') : '<option>no pathway</option>';
+  sel.value = P.kPath; sel.disabled = kp.length < 2;
+  P.kLine = Math.min(P.kLine, P.ny - 1); $('kLine').max = P.ny - 1; $('kLine').value = P.kLine; $('vLine').textContent = `${P.kLine + 1}/${P.ny}`;
+}
+function drawK() {
+  const W = cK.clientWidth, H = cK.clientHeight; if (!W || !H) return;
+  const d = devicePixelRatio || 1;
+  if (cK.width !== Math.round(W * d) || cK.height !== Math.round(H * d)) { cK.width = Math.round(W * d); cK.height = Math.round(H * d); }
+  const c = xK; c.setTransform(d, 0, 0, d, 0, 0); c.clearRect(0, 0, W, H);
+  const info = $('kInfo'), M = MODEL;
+  if (!M || !M.adcs.length) { info.textContent = 'No ADC: nothing is sampled.'; return; }
+  const p = AN.kp[P.kPath];
+  if (!p) { info.textContent = 'No transverse magnetisation reaches this ADC.'; return; }
+  const ro = M.RO[AN.ai], q = p.q, Nx = ro.n, Ny = M.Ny, KX = (Nx / 2) * ro.gx, KY = (Ny / 2) * ro.gy, K = Math.max(KX, KY), fl = l => (l - Ny / 2) / (Ny / 2);
+  // samples of every line (effective k = stored k for a + state)
+  const S = [];
+  let ext = 0;
+  for (let l = 0; l < Ny; l++) {
+    const f = fl(l), row = new Float64Array(2 * Nx);
+    for (let j = 0; j < Nx; j++) {
+      const kx = q.kf[0] + f * q.kt[0] + ro.kf[0][j] + f * ro.kt[0][j], ky = q.kf[1] + f * q.kt[1] + ro.kf[1][j] + f * ro.kt[1][j];
+      row[2 * j] = kx; row[2 * j + 1] = ky; ext = Math.max(ext, Math.abs(kx), Math.abs(ky));
+    }
+    S.push(row);
+  }
+  const E = Math.min(4 * K, Math.max(1.3 * K, ext * 1.08));
+  const top = 30, bot = Math.max(40, info.offsetHeight + 16), side = Math.min(W - 24, H - top - bot), x0 = (W - side) / 2, y0 = top + (H - top - bot - side) / 2;
+  const X = k => x0 + side / 2 + k / E * side / 2, Y = k => y0 + side / 2 - k / E * side / 2;
+  c.save(); c.beginPath(); c.rect(x0, y0, side, side); c.clip();
+  c.fillStyle = CS.panel2; c.fillRect(x0, y0, side, side);
+  // target region and grid of the reconstruction
+  c.strokeStyle = CS.grid; c.lineWidth = 1; c.beginPath();
+  const gstep = (N, dk) => { let s2 = 1; while ((X(dk * s2) - X(0)) < 6) s2 *= 2; return s2; };
+  for (let i = -Nx / 2, st = gstep(Nx, ro.gx); i <= Nx / 2; i += st) { const kx = i * ro.gx; c.moveTo(X(kx), Y(-KY)); c.lineTo(X(kx), Y(KY)); }
+  for (let i = -Ny / 2, st = gstep(Ny, ro.gy); i <= Ny / 2; i += st) { const ky = i * ro.gy; c.moveTo(X(-KX), Y(ky)); c.lineTo(X(KX), Y(ky)); }
+  c.stroke();
+  c.strokeStyle = CS.muted; c.setLineDash([4, 3]); c.strokeRect(X(-KX), Y(KY), X(KX) - X(-KX), Y(-KY) - Y(KY)); c.setLineDash([]);
+  // all samples, faint
+  c.fillStyle = hexA(CS.adc, 0.35);
+  for (const row of S) for (let j = 0; j < Nx; j++) c.fillRect(X(row[2 * j]) - 0.75, Y(row[2 * j + 1]) - 0.75, 1.5, 1.5);
+  // paths: a few lines faint, the chosen line bold
+  const tEnd = ro.a.t + ro.a.dur;
+  const drawPath = (l, col, w) => {
+    const segs = replayK(M, q.h, fl(l), tEnd); let last = null;
+    c.lineWidth = w; c.strokeStyle = col;
+    for (const sg of segs) {
+      if (sg.jump) { last = last ? { ...last, jump: true } : null; continue; }
+      const pts = sg.pts; if (!pts.length) continue;
+      if (last && last.jump) { c.setLineDash([2, 3]); c.beginPath(); c.moveTo(X(last.k[0]), Y(last.k[1])); c.lineTo(X(pts[0][0]), Y(pts[0][1])); c.stroke(); c.setLineDash([]); }
+      c.beginPath(); pts.forEach((k, i) => i ? c.lineTo(X(k[0]), Y(k[1])) : c.moveTo(X(k[0]), Y(k[1]))); c.stroke();
+      last = { k: pts[pts.length - 1] };
+    }
+    return segs;
+  };
+  for (let l = 0; l < Ny; l += Math.max(1, Math.round(Ny / 4))) if (l !== P.kLine) drawPath(l, hexA(CS.grad, 0.25), 1);
+  const row = S[P.kLine];
+  c.fillStyle = CS.adc; for (let j = 0; j < Nx; j++) { c.beginPath(); c.arc(X(row[2 * j]), Y(row[2 * j + 1]), 2.4, 0, 2 * Math.PI); c.fill(); }
+  const segs = drawPath(P.kLine, CS.ui, 2);
+  // start of the path (just after excitation), and an arrow at its end
+  const first = segs.find(sg => !sg.jump && sg.pts.length);
+  if (first) { c.fillStyle = CS.ui; c.beginPath(); c.arc(X(first.pts[0][0]), Y(first.pts[0][1]), 4, 0, 2 * Math.PI); c.fill(); }
+  const lastSeg = segs.filter(sg => !sg.jump && sg.pts.length > 1).pop();
+  if (lastSeg) {
+    const pts = lastSeg.pts, a = pts[pts.length - 1], b = pts[Math.max(0, pts.length - 4)], ang = Math.atan2(-(Y(a[1]) - Y(b[1])), X(a[0]) - X(b[0]));
+    const ax = X(a[0]), ay = Y(a[1]); c.fillStyle = CS.ui; c.beginPath();
+    c.moveTo(ax, ay); c.lineTo(ax - 9 * Math.cos(ang - 0.45), ay + 9 * Math.sin(ang - 0.45)); c.lineTo(ax - 9 * Math.cos(ang + 0.45), ay + 9 * Math.sin(ang + 0.45)); c.closePath(); c.fill();
+  }
+  c.restore();
+  // centre of k-space
+  c.strokeStyle = CS.echo; c.lineWidth = 1.5; const cx = X(0), cy = Y(0);
+  c.beginPath(); c.moveTo(cx - 8, cy); c.lineTo(cx + 8, cy); c.moveTo(cx, cy - 8); c.lineTo(cx, cy + 8); c.stroke(); c.lineWidth = 1;
+  c.strokeStyle = CS.line; c.strokeRect(x0 + 0.5, y0 + 0.5, side - 1, side - 1);
+  c.fillStyle = CS.muted; c.font = `400 10px ui-monospace,Menlo,Consolas,monospace`; c.textAlign = 'right'; c.textBaseline = 'bottom';
+  c.fillText(`kx (1/m) ±${fmt(E)}`, x0 + side - 4, y0 + side - 3); c.textAlign = 'left'; c.textBaseline = 'top'; c.fillText('ky', x0 + 4, y0 + 3);
+  // readout: where does the chosen line cross the centre, and the through-slice k
+  let jmin = 0, bmin = Infinity; for (let j = 0; j < Nx; j++) { const v = Math.abs(row[2 * j]); if (v < bmin) { bmin = v; jmin = j; } }
+  const off = (row[2 * jmin] / ro.gx), kzTxt = Math.abs(p.kz) < 0.5 ? 'k_z = 0' : `k_z = ${fmt(p.kz)} 1/m, slab signal ×${fmt(p.fac)}`;
+  info.innerHTML = `Dashed box: the ${Nx} × ${Ny} grid the reconstruction assumes (k = 0 at +). ` +
+    (bmin <= 0.5 * ro.gx ? `k_x = 0 at sample ${jmin + 1} of ${Nx} (centre is ${Math.floor(Nx / 2) + 1})` : `k_x never reaches 0 on this line (closest ${fmt(off)} Δk)`) + ` · ${kzTxt}`;
+}
+$('kLine').addEventListener('input', e => { P.kLine = +e.target.value; $('vLine').textContent = `${P.kLine + 1}/${P.ny}`; drawK(); drawTL(); });
+$('kPath').addEventListener('change', e => { P.kPath = +e.target.value; drawK(); });
+
+/* ==================== IMAGE VIEW ==================== */
+const cI = $('cI'), xI = cI.getContext('2d');
+let IMG = null, imgTimer = null;
+function scheduleImage(delay = 220) {
+  clearTimeout(imgTimer); $('busy').hidden = false;
+  imgTimer = setTimeout(() => { try { IMG = simulateImage(); } catch (err) { console.error(err); IMG = { error: 'Simulation failed: ' + err.message }; } $('busy').hidden = true; drawImage(); }, delay);
+}
+function drawImage() {
+  const W = cI.clientWidth, H = cI.clientHeight; if (!W || !H) return;
+  const d = devicePixelRatio || 1;
+  if (cI.width !== Math.round(W * d) || cI.height !== Math.round(H * d)) { cI.width = Math.round(W * d); cI.height = Math.round(H * d); }
+  xI.setTransform(d, 0, 0, d, 0, 0); xI.clearRect(0, 0, W, H);
+  const info = $('imgInfo');
+  if (!IMG) { info.textContent = ''; return; }
+  if (IMG.error) { info.textContent = IMG.error; return; }
+  const Nx = IMG.Nx, Ny = IMG.Ny, NN = Nx * Ny;
+  // a fixed window around the object (same mm per screen pixel whatever the FOV), so the object keeps its size on screen
+  // and only the pixels change: a larger voxel is blockier, a small FOV shows its edges and folds, a large one is cropped
+  const avW = W - 24, avH = H - 34 - Math.max(50, $('imgInfo').offsetHeight + 28), S = Math.max(40, Math.min(avW, avH));
+  const V = 2.2 * phantom(P.phantom).ext, mmpx = S / V, wx0 = (W - S) / 2, wy0 = 34 + Math.max(0, (avH - S) / 2);
+  const iw = P.view === 'k' ? S : IMG.fovX * mmpx, ih = P.view === 'k' ? S : IMG.fovY * mmpx;
+  const x0 = wx0 + (S - iw) / 2, y0 = wy0 + (S - ih) / 2;
+  const off = document.createElement('canvas'); off.width = Nx; off.height = Ny;
+  const oc = off.getContext('2d'), id = oc.createImageData(Nx, Ny);
+  let vals = new Float64Array(NN), lo = 0, hi = 1, mask = null;
+  if (P.view === 'k') {
+    let mx = 0; for (let o = 0; o < NN; o++) { vals[o] = Math.log10(1e-12 + Math.hypot(IMG.SR[o], IMG.SI[o])); mx = Math.max(mx, vals[o]); }
+    lo = mx - 4; hi = mx;
+  } else {
+    let mx = 0; const mag = new Float64Array(NN);
+    for (let o = 0; o < NN; o++) { mag[o] = Math.hypot(IMG.imgR[o], IMG.imgI[o]); mx = Math.max(mx, mag[o]); }
+    const white = P.auto ? mx : IMG.ref * 0.45 / Math.pow(2, P.bright);
+    if (P.view === 'phase') { mask = mag.map(v => Math.min(1, v / (0.15 * white))); for (let o = 0; o < NN; o++) vals[o] = Math.atan2(IMG.imgI[o], IMG.imgR[o]); lo = -Math.PI; hi = Math.PI; }
+    else { vals = mag; lo = 0; hi = white || 1; }
+    IMG.peak = mx / IMG.ref;
+  }
+  for (let y = 0; y < Ny; y++) for (let x = 0; x < Nx; x++) {
+    const o = y * Nx + x, q = ((Ny - 1 - y) * Nx + x) * 4; // +y (anterior) up
+    const v = Math.max(0, Math.min(1, (vals[o] - lo) / (hi - lo)));
+    if (P.view === 'phase') { const [r, g, b] = hsv(v, mask[o]); id.data[q] = r; id.data[q + 1] = g; id.data[q + 2] = b; }
+    else id.data[q] = id.data[q + 1] = id.data[q + 2] = 255 * v;
+    id.data[q + 3] = 255;
+  }
+  oc.putImageData(id, 0, 0);
+  xI.save(); xI.beginPath(); xI.rect(wx0, wy0, S, S); xI.clip();
+  if (P.view !== 'k') { // outside the FOV: hatched, nothing is reconstructed there
+    xI.fillStyle = '#1b1d22'; xI.fillRect(wx0, wy0, S, S);
+    xI.strokeStyle = '#2a2d34'; xI.lineWidth = 1; xI.beginPath(); for (let u = -S; u < S; u += 7) { xI.moveTo(wx0 + u, wy0 + S); xI.lineTo(wx0 + u + S, wy0); } xI.stroke();
+  }
+  xI.fillStyle = '#000'; xI.fillRect(x0, y0, iw, ih);
+  xI.imageSmoothingEnabled = false; xI.drawImage(off, x0, y0, iw, ih); // pixels shown as they are: the voxel size is visible
+  if (P.view !== 'k') { xI.strokeStyle = 'rgba(255,214,120,.55)'; xI.setLineDash([4, 3]); xI.strokeRect(x0 + 0.5, y0 + 0.5, iw - 1, ih - 1); xI.setLineDash([]); }
+  xI.restore();
+  if (P.view !== 'k') {
+    xI.font = `600 11px ui-monospace,Menlo,Consolas,monospace`; xI.fillStyle = 'rgba(255,214,120,.9)'; xI.textBaseline = 'middle';
+    xI.textAlign = 'center'; xI.fillText('A', wx0 + S / 2, wy0 + 10); xI.fillText('P', wx0 + S / 2, wy0 + S - 10);
+    xI.textAlign = 'left'; xI.fillText('R', wx0 + 6, wy0 + S / 2); xI.textAlign = 'right'; xI.fillText('L', wx0 + S - 6, wy0 + S / 2);
+    // 50 mm scale bar
+    const sb = 50 * mmpx; xI.strokeStyle = CS.muted; xI.lineWidth = 2; xI.beginPath(); xI.moveTo(wx0, wy0 + S + 8); xI.lineTo(wx0 + sb, wy0 + S + 8); xI.stroke(); xI.lineWidth = 1;
+    xI.fillStyle = CS.muted; xI.font = `400 9.5px ui-monospace,Menlo,Consolas,monospace`; xI.textAlign = 'left'; xI.fillText('50 mm · dashed: FOV', wx0 + sb + 5, wy0 + S + 8);
+  }
+  const tm = MODEL ? MODEL.adcs[IMG.ai] : null;
+  info.innerHTML = `${Nx} × ${Ny}, FOV ${fmt(IMG.fovX)} × ${fmt(IMG.fovY)} mm, voxel ${fmt(IMG.fovX / Nx)} × ${fmt(IMG.fovY / Ny)} mm${IMG.noRead ? ' · no read gradient during the ADC' : ''}${IMG.noPE ? ' · no phase table' : ''}<br>` +
+    (P.view === 'k' ? 'k-space, log magnitude (4 decades) · ' : `Peak signal ${fmt(100 * (IMG.peak || 0))} % of a fully relaxed, fully excited slab · `) +
+    `${IMG.nG} pathway${IMG.nG === 1 ? '' : 's'} reach the readout · computed in ${fmt(IMG.ms)} ms`;
+}
+function hsv(h, v) { const i = Math.floor(h * 6) % 6, f = h * 6 - Math.floor(h * 6), p = 0, q = v * (1 - f), t = v * f; const m = [[v, t, p], [q, v, p], [p, v, t], [p, q, v], [t, p, v], [v, p, q]][i]; return m.map(x => Math.round(x * 255)); }
+document.querySelectorAll('#imgView button').forEach(b => b.addEventListener('click', () => {
+  P.view = b.dataset.v; document.querySelectorAll('#imgView button').forEach(x => x.setAttribute('aria-pressed', x === b)); drawImage();
+}));
+$('adcSel').addEventListener('change', e => { P.adcSel = +e.target.value; P.kPath = 0; changed(false); scheduleImage(0); });
+
+/* ==================== GLOBAL CONTROLS ==================== */
+function syncEncoding() {
+  const T = EL.filter(e => e.table), A = T.length ? Math.max(...T.map(e => Math.abs(e.amp))) : 0;
+  const put = (id, v) => { if (document.activeElement !== $(id)) $(id).value = v; }; // never overwrite what the user is typing
+  put('nNy', P.ny); put('rNy', P.ny); put('nDw', P.dwell); put('rDw', P.dwell); put('nPA', +A.toFixed(2)); put('rPA', A); $('nPA').disabled = $('rPA').disabled = !T.length;
+  const E = ENC, rows = [];
+  if (!E) rows.push(['Encoding', 'no ADC']);
+  else {
+    rows.push(['Matrix (read × phase)', `${E.Nx} × ${E.Ny}`]);
+    rows.push(['FOV', E.noRead && E.noPE ? '–' : `${E.noRead ? '–' : fmt(E.fovX)} × ${E.noPE ? '–' : fmt(E.fovY)} mm`]);
+    rows.push(['Voxel', `${E.noRead ? '–' : fmt(E.fovX / E.Nx)} × ${E.noPE ? '–' : fmt(E.fovY / E.Ny)} mm`]);
+    rows.push(['k_max (read, phase)', `${E.noRead ? '–' : fmt(E.kx)}, ${E.noPE ? '–' : fmt(E.ky)} 1/m`]);
+    rows.push(['Bandwidth / pixel', `${fmt(E.bw)} Hz`]);
+  }
+  if (!T.length) rows.push(['Phase table', 'none: add one to the Gy rail']);
+  $('encRead').innerHTML = rows.map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('');
+}
+function setNy(v) { // keeps the FOV: the table is scaled so the step between lines stays the same, so k_max and the resolution follow
+  v = Math.max(8, Math.min(256, Math.round(v / 2) * 2)); if (v === P.ny) return; snapshot();
+  const f = v / P.ny; for (const e of EL) if (e.table) e.amp = Math.round(Math.max(-40, Math.min(40, e.amp * f)) * 100) / 100;
+  P.ny = v; P.kLine = Math.min(P.kLine, v - 1); changed(true);
+}
+function setDwell(v) { v = Math.max(5, Math.min(200, Math.round(v))); if (v === P.dwell) return; snapshot(); P.dwell = v; changed(true); }
+function setPA(v) { const T = EL.filter(e => e.table); if (!T.length || !isFinite(v)) return; snapshot(); for (const e of T) e.amp = Math.round(Math.max(0, Math.min(40, v)) * 100) / 100 * (Math.sign(e.amp) || 1); changed(true); }
+$('rNy').addEventListener('input', e => setNy(+e.target.value)); $('nNy').addEventListener('change', e => setNy(+e.target.value));
+$('rDw').addEventListener('input', e => setDwell(+e.target.value)); $('nDw').addEventListener('change', e => setDwell(+e.target.value));
+$('rPA').addEventListener('input', e => setPA(+e.target.value)); $('nPA').addEventListener('change', e => setPA(+e.target.value));
+$('gapBtn').addEventListener('click', () => {
+  TL.gaps = !TL.gaps; const b = $('gapBtn');
+  b.setAttribute('aria-pressed', TL.gaps); b.textContent = TL.gaps ? 'Long pauses: compressed' : 'Long pauses: true scale';
+  drawTL();
+});
+/* TI: from the centre of a first RF pulse of ≥ 150° to the centre of the next pulse. Changing it moves the excitation and
+   everything after it (from the start of the earliest block that overlaps the excitation); the inversion and its spoiler stay. */
+function irInfo() {
+  const R = EL.filter(e => e.type === 'rf').sort((a, b) => a.t - b.t);
+  if (R.length < 2 || R[0].flip < 150) return null;
+  const inv = R[0], exc = R[1];
+  const tCut = Math.min(...EL.filter(e => elStart(e) <= exc.t && elEnd(e) >= exc.t).map(elStart));
+  const fixed = EL.filter(e => elStart(e) < tCut - 1e-9), minCut = Math.max(...fixed.map(elEnd)) + 0.1;
+  return { inv, exc, TI: exc.t - inv.t, tCut, minTI: exc.t - inv.t - (tCut - minCut) };
+}
+function setTI(v) {
+  const I = irInfo(); if (!I || !isFinite(v)) return;
+  const d = r2(Math.max(I.minTI, Math.min(5000, v)) - I.TI); if (Math.abs(d) < 1e-6) return;
+  snapshot(); for (const e of EL) if (elStart(e) >= I.tCut - 1e-9) e.t = r2(e.t + d);
+  changed(true);
+}
+const tiFromR = v => Math.round(5 * Math.pow(1000, v / 1000)), rFromTI = t => Math.round(1000 * Math.log(Math.max(5, t) / 5) / Math.log(1000));
+function syncTI() {
+  const I = irInfo(), on = !!I;
+  $('nTI').disabled = $('rTI').disabled = !on;
+  if (on) { if (document.activeElement !== $('nTI')) $('nTI').value = +I.TI.toFixed(2); if (document.activeElement !== $('rTI')) $('rTI').value = rFromTI(I.TI); }
+  else $('nTI').value = '';
+  $('tiNote').textContent = on ? `From the ${fmt(I.inv.flip)}° inversion to the ${fmt(I.exc.flip)}° excitation; moves the excitation and everything after it.`
+    : 'Needs an inversion: a first RF pulse of 150° or more, followed by the excitation.';
+}
+$('rTI').addEventListener('input', e => setTI(tiFromR(+e.target.value))); $('nTI').addEventListener('change', e => setTI(+e.target.value));
+const trFromR = v => Math.round(5 * Math.pow(1000, v / 1000)), rFromTR = t => Math.round(1000 * Math.log(t / 5) / Math.log(1000));
+function syncGlobal() {
+  $('nTR').value = P.TR; $('rTR').value = rFromTR(P.TR);
+  $('rT2p').value = P.T2p; $('vT2p').textContent = `${P.T2p} ms`; $('rT2p').disabled = !P.t2s;
+  $('rBright').value = P.bright; $('vBright').textContent = `${fmt(Math.pow(2, P.bright))}×`; $('rBright').disabled = P.auto;
+  $('cT1').checked = P.t1; $('cT2').checked = P.t2; $('cT2s').checked = P.t2s; $('cAuto').checked = P.auto; $('phantom').value = P.phantom;
+}
+$('rTR').addEventListener('input', e => { P.TR = trFromR(+e.target.value); syncGlobal(); changed(true); });
+$('nTR').addEventListener('change', e => { const v = +e.target.value; if (v > 0) { P.TR = v; syncGlobal(); changed(true); } });
+$('rT2p').addEventListener('input', e => { P.T2p = +e.target.value; syncGlobal(); changed(true); });
+for (const [id, k] of [['cT1', 't1'], ['cT2', 't2'], ['cT2s', 't2s']]) $(id).addEventListener('change', e => { P[k] = e.target.checked; syncGlobal(); changed(true); });
+$('phantom').addEventListener('change', e => { P.phantom = e.target.value; changed(true); });
+$('rBright').addEventListener('input', e => { P.bright = +e.target.value; syncGlobal(); drawImage(); });
+$('cAuto').addEventListener('change', e => { P.auto = e.target.checked; syncGlobal(); drawImage(); });
+document.querySelectorAll('#presets button').forEach(b => b.addEventListener('click', () => preset(b.dataset.preset)));
+
+/* ==================== UPDATE ==================== */
+/* full = true: also recompute the image (after an edit ends); false: timeline, readouts and 3D only */
+function changed(full) {
+  analyze(); encodingInfo(); drawTL(); updateEchoList(); syncInspector(document.activeElement); updateKTools(); drawK();
+  syncEncoding(); syncTI();
+  request3D(!full && !!drag);
+  if (full) scheduleImage();
+}
+function resizeAll() { sizeTL(); drawTL(); request3D(false); drawK(); drawImage(); }
+if (window.ResizeObserver) { const ro = new ResizeObserver(resizeAll); ro.observe($('tlwrap')); ro.observe($('pane3')); ro.observe($('paneK')); ro.observe($('paneI')); }
+else window.addEventListener('resize', resizeAll);
+$('theme').addEventListener('click', () => {
+  const root = document.documentElement; root.dataset.theme = root.dataset.theme === 'light' ? 'dark' : 'light';
+  readCSS(); drawTL(); request3D(false); buildInspector(); updateEchoList(); drawK();
+});
+
+/* ------------------------------------------------------------- about */
+$('ver').textContent = 'v' + VERSION;
+$('credit').textContent = `Build sim v${VERSION} · ${AUTHORS}. Phantom from Seqret.`;
+document.querySelector('#about .by').textContent = AUTHORS;
+$('changelog').innerHTML = CHANGELOG.map(([v, d, t], i) => `<div class="rel"><h5>${v} <em>· ${i === 0 ? 'current, ' : ''}${d}</em></h5><p>${t}</p></div>`).join('');
+{
+  const about = $('about');
+  const close = () => { about.hidden = true; $('ver').focus(); };
+  $('ver').addEventListener('click', () => { about.hidden = false; about.querySelector('.sheet').scrollTop = 0; $('aboutClose').focus({ preventScroll: true }); });
+  $('aboutClose').addEventListener('click', close);
+  about.addEventListener('click', e => { if (e.target === about) close(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !about.hidden) close(); });
+}
+
+readCSS(); sizeTL(); syncGlobal();
+preset('gre');
+</script>
+<script>
+/* House style (shared by the MRI simulators): one light/dark preference for the
+   whole suite. The saved choice (or the operating-system setting on a first
+   visit) is applied by clicking the app's own theme button, so each app redraws
+   through its usual path. The button always names the theme it switches TO. */
+(function () {
+  "use strict";
+  var KEY = "mrisim.theme", LEGACY = [];
+  function saved() {
+    try {
+      var keys = [KEY].concat(LEGACY);
+      for (var i = 0; i < keys.length; i++) {
+        var v = localStorage.getItem(keys[i]);
+        if (v === "light" || v === "dark") return v;
+      }
+    } catch (e) { /* storage can be unavailable for file:// pages */ }
+    return null;
+  }
+  window.addEventListener("load", function () {
+    setTimeout(function () {
+      var btn = document.getElementById("theme");
+      if (!btn) return;
+      var root = document.documentElement;
+      var cur = function () { return root.getAttribute("data-theme") === "light" ? "light" : "dark"; };
+      var label = function () { btn.textContent = cur() === "dark" ? "Light" : "Dark"; };
+      var want = saved() || (window.matchMedia &&
+        window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+      if (want !== cur()) btn.click();
+      label();
+      btn.addEventListener("click", function () {
+        label();
+        try { localStorage.setItem(KEY, cur()); } catch (e) { /* file:// */ }
+      });
+    }, 0);
+  });
+})();
+</script>
+</body>
+</html>

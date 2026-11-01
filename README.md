@@ -20,6 +20,7 @@ credits and changelog under the version chip in its header.
 | [`mriReadoutSim.html`](#mrireadoutsimhtml--readout-sim) | K-space trajectories in spin-echo imaging |
 | [`mriArtifactSim.html`](#mriartifactsimhtml--artifact-sim) | Image artifacts from the signal equation |
 | [`mriBTensorSim.html`](#mribtensorsimhtml--b-tensor-sim) | b-tensor glyphs from tensors or gradient waveforms |
+| [`mriBuildSim.html`](#mribuildsimhtml--build-sim) | Building pulse sequences from RF, gradient and ADC blocks |
 
 ## How to use
 
@@ -127,6 +128,24 @@ orientation. It can also be computed from an imported gradient waveform,
 B = ∫q(t)q(t)ᵀdt (fwf toolbox conventions). The waveform can then be scaled,
 mixed and rotated to show how its changes alter the encoding. Keyframe sweeps
 record to H.264 MP4, and stills save as PNG.
+
+## `mriBuildSim.html` — Build sim
+
+![Build sim](docs/img/mriBuildSim.png)
+
+Students build a pulse sequence by dragging RF pulses, gradients, a phase
+table and ADC events onto rails, and see which components are needed: slice
+rewinders, read prephasers, phase encoding. Gradient areas are split at RF
+centres and at the nominal echo, so rewinders and prephasers can be designed
+by matching numbers. The 3D view shows the slab each pulse acts on (from flip
+angle, frequency offset and the slice gradient). A k-space view follows the
+trajectory of each coherence pathway, and a simulated image updates with the
+sequence. Matrix, FOV and voxel size follow from the dwell time, the read
+gradient, the number of phase steps and the phase table's amplitude. Examples
+cover gradient echo, spin echo, stimulated echo, double spin echo and
+inversion-recovery spin echo. The signal model is an extended-phase-graph style
+coherence-pathway calculation with ideal, instantaneous RF and rectangular
+slabs; the phantom is taken from Seqret.
 
 ## Licence
 
