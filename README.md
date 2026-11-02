@@ -10,22 +10,74 @@ for showing ideas and making figures and clips, not for predicting signal. The
 models are deliberately simplified. Each simulator lists its simplifications,
 credits and changelog under the version chip in its header.
 
-| Simulator | Topic |
-|---|---|
-| [`mriRelaxSim.html`](#mrirelaxsimhtml--relaxation-sim) | T1, T2 and T2\* relaxation |
-| [`mriSeqSim.html`](#mriseqsimhtml--sequence-sim) | Bloch simulation of common sequences |
-| [`mriFieldSim.html`](#mrifieldsimhtml--field-sim) | Gradient and concomitant (Maxwell) fields |
-| [`mriInductSim.html`](#mriinductsimhtml--induction-sim) | Signal induction in a receive coil |
-| [`mriSliceSim.html`](#mrislicesimhtml--slice-sim) | Slice-selective excitation and the rewinder |
-| [`mriReadoutSim.html`](#mrireadoutsimhtml--readout-sim) | K-space trajectories in spin-echo imaging |
-| [`mriArtifactSim.html`](#mriartifactsimhtml--artifact-sim) | Image artifacts from the signal equation |
-| [`mriBTensorSim.html`](#mribtensorsimhtml--b-tensor-sim) | b-tensor glyphs from tensors or gradient waveforms |
-| [`mriBuildSim.html`](#mribuildsimhtml--build-sim) | Building pulse sequences from RF, gradient and ADC blocks |
+[![Open the simulators online](https://img.shields.io/badge/%E2%96%B6%20Open%20the%20simulators%20online-filip--szczepankiewicz.github.io%2FmriSimGraphical-0f8f8a?style=for-the-badge)](https://filip-szczepankiewicz.github.io/mriSimGraphical/)
+
+## Simulators
+
+Click a picture or a name to open the specific simulator in the browser directly.
+
+<table>
+<tr>
+<td width="33%" valign="top">
+<a href="mriRelaxSim.html"><img src="docs/img/mriRelaxSim.png" alt="Relaxation sim" width="260"></a><br>
+<a href="mriRelaxSim.html"><b>▶ Relaxation sim</b></a><br>
+T1, T2 and T2* relaxation · <a href="#mrirelaxsimhtml--relaxation-sim">details</a>
+</td>
+<td width="33%" valign="top">
+<a href="mriSeqSim.html"><img src="docs/img/mriSeqSim.png" alt="Sequence sim" width="260"></a><br>
+<a href="mriSeqSim.html"><b>▶ Sequence sim</b></a><br>
+Bloch simulation of common sequences · <a href="#mriseqsimhtml--sequence-sim">details</a>
+</td>
+<td width="33%" valign="top">
+<a href="mriFieldSim.html"><img src="docs/img/mriFieldSim.png" alt="Field sim" width="260"></a><br>
+<a href="mriFieldSim.html"><b>▶ Field sim</b></a><br>
+Gradient and concomitant (Maxwell) fields · <a href="#mrifieldsimhtml--field-sim">details</a>
+</td>
+</tr>
+<tr>
+<td width="33%" valign="top">
+<a href="mriInductSim.html"><img src="docs/img/mriInductSim.png" alt="Induction sim" width="260"></a><br>
+<a href="mriInductSim.html"><b>▶ Induction sim</b></a><br>
+Signal induction in a receive coil · <a href="#mriinductsimhtml--induction-sim">details</a>
+</td>
+<td width="33%" valign="top">
+<a href="mriSliceSim.html"><img src="docs/img/mriSliceSim.png" alt="Slice sim" width="260"></a><br>
+<a href="mriSliceSim.html"><b>▶ Slice sim</b></a><br>
+Slice-selective excitation and the rewinder · <a href="#mrislicesimhtml--slice-sim">details</a>
+</td>
+<td width="33%" valign="top">
+<a href="mriReadoutSim.html"><img src="docs/img/mriReadoutSim.png" alt="Readout sim" width="260"></a><br>
+<a href="mriReadoutSim.html"><b>▶ Readout sim</b></a><br>
+K-space trajectories in spin-echo imaging · <a href="#mrireadoutsimhtml--readout-sim">details</a>
+</td>
+</tr>
+<tr>
+<td width="33%" valign="top">
+<a href="mriArtifactSim.html"><img src="docs/img/mriArtifactSim.png" alt="Artifact sim" width="260"></a><br>
+<a href="mriArtifactSim.html"><b>▶ Artifact sim</b></a><br>
+Image artifacts from the signal equation · <a href="#mriartifactsimhtml--artifact-sim">details</a>
+</td>
+<td width="33%" valign="top">
+<a href="mriBTensorSim.html"><img src="docs/img/mriBTensorSim.png" alt="B-tensor sim" width="260"></a><br>
+<a href="mriBTensorSim.html"><b>▶ B-tensor sim</b></a><br>
+b-tensor glyphs from tensors or gradient waveforms · <a href="#mribtensorsimhtml--b-tensor-sim">details</a>
+</td>
+<td width="33%" valign="top">
+<a href="mriBuildSim.html"><img src="docs/img/mriBuildSim.png" alt="Build sim" width="260"></a><br>
+<a href="mriBuildSim.html"><b>▶ Build sim</b></a><br>
+Building pulse sequences from RF, gradient and ADC blocks · <a href="#mribuildsimhtml--build-sim">details</a>
+</td>
+</tr>
+</table>
 
 ## How to use
 
-Download a simulator and open it in a local browser. Clicking an `.html` file
-on GitHub only shows its source.
+**Online:** open the [simulator site](https://filip-szczepankiewicz.github.io/mriSimGraphical/)
+and pick a simulator. Each simulator has an *All simulators* link at the top of
+its control panel that leads back to the list.
+
+**Offline:** download a simulator and open it in a local browser. Clicking an
+`.html` file on GitHub only shows its source.
 
 - **One file:** open the file on GitHub and click *Download raw file* (↓).
 - **All files:** **Code → Download ZIP**, or
@@ -38,6 +90,8 @@ from the file manager; some file viewers show the source instead.
 
 ## `mriRelaxSim.html` — Relaxation sim
 
+**[▶ Open Relaxation sim](mriRelaxSim.html)**
+
 ![Relaxation sim](docs/img/mriRelaxSim.png)
 
 Where T1, T2 and T2\* come from: an isochromat ensemble under T1 relaxation,
@@ -46,6 +100,8 @@ plane and as a signal with analytic envelopes. Includes hard or finite RF pulses
 and a spin-echo demo.
 
 ## `mriSeqSim.html` — Sequence sim
+
+**[▶ Open Sequence sim](mriSeqSim.html)**
 
 ![Sequence sim](docs/img/mriSeqSim.png)
 
@@ -56,6 +112,8 @@ acquisition, and video recording.
 
 ## `mriFieldSim.html` — Field sim
 
+**[▶ Open Field sim](mriFieldSim.html)**
+
 ![Field sim](docs/img/mriFieldSim.png)
 
 3D view of the ideal gradient field and its concomitant (Maxwell) terms, from
@@ -64,6 +122,8 @@ optional ΔB surface, gradient modulation, and orbit or wiggle recordings for
 slides.
 
 ## `mriInductSim.html` — Induction sim
+
+**[▶ Open Induction sim](mriInductSim.html)**
 
 ![Induction sim](docs/img/mriInductSim.png)
 
@@ -74,6 +134,8 @@ spin view shows an exaggerated measurement-probability surface and the live
 2×2 density matrix.
 
 ## `mriSliceSim.html` — Slice sim
+
+**[▶ Open Slice sim](mriSliceSim.html)**
 
 ![Slice sim](docs/img/mriSliceSim.png)
 
@@ -87,6 +149,8 @@ model is the rotating-frame Bloch equation without relaxation.
 
 ## `mriReadoutSim.html` — Readout sim
 
+**[▶ Open Readout sim](mriReadoutSim.html)**
+
 ![Readout sim](docs/img/mriReadoutSim.png)
 
 The effective k-space trajectory of a spin-echo acquisition in 3D, synced with
@@ -97,6 +161,8 @@ single-shot and segmented spirals, all at a common adjustable resolution.
 Ramps, hardware limits and relaxation are simplified.
 
 ## `mriArtifactSim.html` — Artifact sim
+
+**[▶ Open Artifact sim](mriArtifactSim.html)**
 
 ![Artifact sim](docs/img/mriArtifactSim.png)
 
@@ -120,6 +186,8 @@ only: no relaxation.
 
 ## `mriBTensorSim.html` — B-tensor sim
 
+**[▶ Open B-tensor sim](mriBTensorSim.html)**
+
 ![B-tensor sim](docs/img/mriBTensorSim.png)
 
 The b-tensor as a superquadric glyph, coloured by shape or direction. It can be
@@ -130,6 +198,8 @@ mixed and rotated to show how its changes alter the encoding. Keyframe sweeps
 record to H.264 MP4, and stills save as PNG.
 
 ## `mriBuildSim.html` — Build sim
+
+**[▶ Open Build sim](mriBuildSim.html)**
 
 ![Build sim](docs/img/mriBuildSim.png)
 
