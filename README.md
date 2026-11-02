@@ -219,5 +219,5 @@ slabs; the phantom is taken from Seqret.
 
 ## Licence
 
-MIT License (see [`LICENSE`](LICENSE)). See [`NOTICE`](NOTICE) for attribution,
+MIT License (see [`LICENSE`](LICENSE)). See [`NOTICE`](NOTICE.md) for attribution,
 AI-assisted development and bundled third-party software.
